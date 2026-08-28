@@ -15,8 +15,8 @@ func cmdConsole(ctx *cmdContext) error {
 	}
 
 	result, err := page.Eval(`() => {
-		if (!window.__broConsole) { return [] }
-		return window.__broConsole.map(m => m.level + ': ' + m.text)
+		if (!window.__peekConsole) { return [] }
+		return window.__peekConsole.map(m => m.level + ': ' + m.text)
 	}`)
 	if err != nil {
 		return fmt.Errorf("failed to read console messages: %w", err)
@@ -42,7 +42,7 @@ func cmdConsole(ctx *cmdContext) error {
 
 func getConsoleFromRuntime(page *rod.Page) error {
 	result, err := page.Eval(`() => {
-		return 'Console capture installed. Run your action, then call "bro console" again to see messages.';
+		return 'Console capture installed. Run your action, then call "peek console" again to see messages.';
 	}`)
 	if err != nil {
 		return err
@@ -124,7 +124,7 @@ func formatBytes(v interface{}) string {
 
 func cmdDialog(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro dialog accept [text] | dismiss")
+		return fmt.Errorf("usage: peek dialog accept [text] | dismiss")
 	}
 
 	_, page, err := connect(ctx)

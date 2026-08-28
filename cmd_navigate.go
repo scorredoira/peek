@@ -10,7 +10,7 @@ import (
 
 func cmdNavigate(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro navigate <url>")
+		return fmt.Errorf("usage: peek navigate <url>")
 	}
 
 	_, page, err := connect(ctx)
@@ -72,7 +72,7 @@ func cmdBack(ctx *cmdContext) error {
 
 func cmdResize(ctx *cmdContext, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: bro resize <width> <height>")
+		return fmt.Errorf("usage: peek resize <width> <height>")
 	}
 
 	width, err := strconv.Atoi(args[0])

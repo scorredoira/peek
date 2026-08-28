@@ -10,7 +10,7 @@ import (
 
 func cmdJS(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro js <code>")
+		return fmt.Errorf("usage: peek js <code>")
 	}
 
 	_, page, err := connect(ctx)

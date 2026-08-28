@@ -10,7 +10,7 @@ import (
 
 func cmdTexts(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro texts --css <selector> [--limit N]")
+		return fmt.Errorf("usage: peek texts --css <selector> [--limit N]")
 	}
 
 	_, page, err := connect(ctx)
@@ -43,7 +43,7 @@ func cmdTexts(ctx *cmdContext, args []string) error {
 	}
 
 	if selector == "" {
-		return fmt.Errorf("usage: bro texts --css <selector> [--limit N]")
+		return fmt.Errorf("usage: peek texts --css <selector> [--limit N]")
 	}
 
 	jsCode := fmt.Sprintf(`(function(){

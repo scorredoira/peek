@@ -12,7 +12,7 @@ const defaultTimeout = 10 * time.Second
 
 func cmdWait(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro wait <text> | --gone <text> | --url <pattern>")
+		return fmt.Errorf("usage: peek wait <text> | --gone <text> | --url <pattern>")
 	}
 
 	timeout := defaultTimeout
@@ -33,14 +33,14 @@ func cmdWait(ctx *cmdContext, args []string) error {
 	switch {
 	case args[0] == "--gone":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: bro wait --gone <text>")
+			return fmt.Errorf("usage: peek wait --gone <text>")
 		}
 		text := strings.Join(args[1:], " ")
 		return waitGone(ctx, text, timeout)
 
 	case args[0] == "--url":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: bro wait --url <pattern>")
+			return fmt.Errorf("usage: peek wait --url <pattern>")
 		}
 		return waitURL(ctx, args[1], timeout)
 

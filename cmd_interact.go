@@ -12,7 +12,7 @@ import (
 
 func cmdClick(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro click [--css <sel>] [--id <id>] [text]")
+		return fmt.Errorf("usage: peek click [--css <sel>] [--id <id>] [text]")
 	}
 
 	_, page, err := connect(ctx)
@@ -85,7 +85,7 @@ func coveredBy(el *rod.Element) (string, error) {
 
 func cmdRightClick(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro rightclick [--css <sel>] [--id <id>] [text]")
+		return fmt.Errorf("usage: peek rightclick [--css <sel>] [--id <id>] [text]")
 	}
 
 	_, page, err := connect(ctx)
@@ -131,7 +131,7 @@ func cmdRightClick(ctx *cmdContext, args []string) error {
 
 func cmdDblClick(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro dblclick [--css <sel>] [--id <id>] [text]")
+		return fmt.Errorf("usage: peek dblclick [--css <sel>] [--id <id>] [text]")
 	}
 
 	_, page, err := connect(ctx)
@@ -155,7 +155,7 @@ func cmdDblClick(ctx *cmdContext, args []string) error {
 
 func cmdFill(ctx *cmdContext, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: bro fill [--name <name>] [--css <sel>] <label> <value>")
+		return fmt.Errorf("usage: peek fill [--name <name>] [--css <sel>] <label> <value>")
 	}
 
 	_, page, err := connect(ctx)
@@ -188,20 +188,20 @@ func cmdFill(ctx *cmdContext, args []string) error {
 
 	if nameAttr != "" {
 		if len(rest) == 0 {
-			return fmt.Errorf("usage: bro fill --name <name> <value>")
+			return fmt.Errorf("usage: peek fill --name <name> <value>")
 		}
 		el, err = findByCSS(page, fmt.Sprintf(`input[name=%q], textarea[name=%q]`, nameAttr, nameAttr), "")
 		desc = fmt.Sprintf("name=%q", nameAttr)
 		rest = rest // value is all of rest
 	} else if cssAttr != "" {
 		if len(rest) == 0 {
-			return fmt.Errorf("usage: bro fill --css <selector> <value>")
+			return fmt.Errorf("usage: peek fill --css <selector> <value>")
 		}
 		el, err = findByCSS(page, cssAttr, "")
 		desc = fmt.Sprintf("css=%q", cssAttr)
 	} else {
 		if len(rest) < 2 {
-			return fmt.Errorf("usage: bro fill <label> <value>")
+			return fmt.Errorf("usage: peek fill <label> <value>")
 		}
 		label := rest[0]
 		rest = rest[1:]
@@ -229,7 +229,7 @@ func cmdFill(ctx *cmdContext, args []string) error {
 
 func cmdSelect(ctx *cmdContext, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: bro select <label> <value>")
+		return fmt.Errorf("usage: peek select <label> <value>")
 	}
 
 	_, page, err := connect(ctx)
@@ -319,7 +319,7 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 
 func cmdType(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro type <text>")
+		return fmt.Errorf("usage: peek type <text>")
 	}
 
 	_, page, err := connect(ctx)
@@ -338,7 +338,7 @@ func cmdType(ctx *cmdContext, args []string) error {
 
 func cmdPress(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro press <key>")
+		return fmt.Errorf("usage: peek press <key>")
 	}
 
 	_, page, err := connect(ctx)
@@ -357,7 +357,7 @@ func cmdPress(ctx *cmdContext, args []string) error {
 
 func cmdHover(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro hover [--css <sel>] [--id <id>] [text]")
+		return fmt.Errorf("usage: peek hover [--css <sel>] [--id <id>] [text]")
 	}
 
 	_, page, err := connect(ctx)
@@ -381,7 +381,7 @@ func cmdHover(ctx *cmdContext, args []string) error {
 
 func cmdDrag(ctx *cmdContext, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: bro drag <from-text> <to-text>")
+		return fmt.Errorf("usage: peek drag <from-text> <to-text>")
 	}
 
 	_, page, err := connect(ctx)
@@ -431,7 +431,7 @@ func cmdDrag(ctx *cmdContext, args []string) error {
 
 func cmdUpload(ctx *cmdContext, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: bro upload <selector> <filepath>")
+		return fmt.Errorf("usage: peek upload <selector> <filepath>")
 	}
 
 	_, page, err := connect(ctx)

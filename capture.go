@@ -5,7 +5,7 @@ import (
 )
 
 // The page's own account of itself: what it logged, what it threw, and what it asked for and
-// did not get. It lives in the PAGE rather than in a CDP listener because bro is a CLI — every
+// did not get. It lives in the PAGE rather than in a CDP listener because peek is a CLI — every
 // command is a process that connects, acts and exits, so nothing here outlives a command. A
 // listener would only ever hear what happened while that one command was running.
 //
@@ -18,7 +18,7 @@ import (
 //     that renders perfectly and is empty, which a screenshot cannot tell from "no rows yet".
 //
 // Both of those are invisible to a console patch, and both are how a screen that looks right
-// turns out to be broken. `bro network` cannot answer it either: it reads
+// turns out to be broken. `peek network` cannot answer it either: it reads
 // performance.getEntriesByType("resource"), which lists what was requested and not how it went.
 //
 // It is idempotent and cheap, so every command that touches a page installs it without asking.
@@ -28,14 +28,14 @@ import (
 // function there is created and thrown away, which installs nothing at all and looks exactly
 // like success. Building both forms from one body is what stops them drifting apart.
 const captureBody = `
-	if (window.__broCapture) { return }
-	window.__broCapture = true
-	window.__broConsole = window.__broConsole || []
+	if (window.__peekCapture) { return }
+	window.__peekCapture = true
+	window.__peekConsole = window.__peekConsole || []
 
 	const keep = (level, text) => {
-		window.__broConsole.push({ level: level, text: String(text).slice(0, 2000) })
+		window.__peekConsole.push({ level: level, text: String(text).slice(0, 2000) })
 		// Bounded: a page in a render loop must not grow this without limit.
-		if (window.__broConsole.length > 500) { window.__broConsole.shift() }
+		if (window.__peekConsole.length > 500) { window.__peekConsole.shift() }
 	}
 
 	const orig = {}
@@ -89,11 +89,11 @@ const captureBody = `
 // a throw at load time or a data call that 404s on the first render is caught. It applies to the
 // NEXT document, which is why every command that navigates installs before navigating.
 //
-// The plain Eval covers the page that is already open — `bro console` on a screen loaded ten
+// The plain Eval covers the page that is already open — `peek console` on a screen loaded ten
 // minutes ago still gets whatever happens from now on, rather than nothing.
 //
-// What it does not cover is the very first page `bro open` loads: Chrome is launched pointing at
-// the url, so it is already loading before any session exists to register anything. A `bro
+// What it does not cover is the very first page `peek open` loads: Chrome is launched pointing at
+// the url, so it is already loading before any session exists to register anything. A `peek
 // reload` afterwards gets it. Fixing that means launching blank and navigating, which is a
 // change to how Chrome starts for a payoff that a reload already buys.
 //

@@ -1,11 +1,43 @@
-# bro — browser remote operator
+# peek — browser remote operator
 
 CLI tool to control Chrome via DevTools Protocol. No MCP, no Puppeteer, no intermediaries. Talks directly to Chrome.
 
 ## Install
 
+Download the binary for your platform and put it on your `PATH`. Nothing else is
+needed — `peek` drives the Chrome you already have.
+
+**macOS (Apple Silicon)**
+
 ```bash
-go install github.com/scorredoira/bro@latest
+curl -fsSL https://prisnap.com/peek/peek-darwin-arm64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+```
+
+**macOS (Intel)**
+
+```bash
+curl -fsSL https://prisnap.com/peek/peek-darwin-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+```
+
+**Linux**
+
+```bash
+curl -fsSL https://prisnap.com/peek/peek-linux-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+```
+
+**Windows (PowerShell)**
+
+```powershell
+curl.exe -fsSL https://prisnap.com/peek/peek-windows-amd64.exe -o peek.exe
+```
+
+A binary fetched with `curl` carries no quarantine attribute, so macOS Gatekeeper
+never runs and there is nothing to sign or notarize.
+
+From source (needs Go):
+
+```bash
+go install github.com/scorredoira/peek@latest
 ```
 
 ## Quick Start
@@ -13,29 +45,29 @@ go install github.com/scorredoira/bro@latest
 Single session (most common):
 
 ```bash
-bro open http://localhost:9092/admin/login
-bro fill Email admin@demo.com
-bro fill Password 123
-bro click Login
-bro close
+peek open http://localhost:9092/admin/login
+peek fill Email admin@demo.com
+peek fill Password 123
+peek click Login
+peek close
 ```
 
 Multiple parallel sessions (each gets its own isolated Chrome):
 
 ```bash
-PORT=$(bro open http://localhost:9092/admin/login)
-bro --port $PORT fill Email admin@demo.com
-bro --port $PORT click Login
-bro --port $PORT close
+PORT=$(peek open http://localhost:9092/admin/login)
+peek --port $PORT fill Email admin@demo.com
+peek --port $PORT click Login
+peek --port $PORT close
 ```
 
 ## Usage
 
 ```
-bro [--port PORT] [--headless] [-w N] <command> [args...]
+peek [--port PORT] [--headless] [-w N] <command> [args...]
 ```
 
-Default port: `9222`. Use `--headless` for headless mode (no browser window). When running multiple sessions, `bro open` auto-picks the next free port and prints it.
+Default port: `9222`. Use `--headless` for headless mode (no browser window). When running multiple sessions, `peek open` auto-picks the next free port and prints it.
 
 ---
 
@@ -48,9 +80,9 @@ Default port: `9222`. Use `--headless` for headless mode (no browser window). Wh
 Launch a new Chrome instance and optionally navigate to a URL. Prints the port number to stdout. Each instance is fully isolated (separate profile, cookies, storage).
 
 ```bash
-bro open                                     # launch Chrome, print port
-bro open http://localhost:9092/admin/login   # launch and navigate
-bro --headless open http://example.com       # headless mode (no window)
+peek open                                     # launch Chrome, print port
+peek open http://localhost:9092/admin/login   # launch and navigate
+peek --headless open http://example.com       # headless mode (no window)
 ```
 
 If a Chrome is already running on the default port (or the one specified with `--port`), prints that port.
@@ -62,8 +94,8 @@ Works on macOS, Linux, and Windows. Auto-detects Chrome location.
 Kill the Chrome instance on the given port.
 
 ```bash
-bro close                    # close Chrome on default port 9222
-bro --port 9223 close        # close Chrome on port 9223
+peek close                    # close Chrome on default port 9222
+peek --port 9223 close        # close Chrome on port 9223
 ```
 
 ---
@@ -75,8 +107,8 @@ bro --port 9223 close        # close Chrome on port 9223
 Go to a URL. Waits for the page to load.
 
 ```bash
-bro --port $PORT navigate http://localhost:9092/admin/login
-bro --port $PORT nav http://example.com
+peek --port $PORT navigate http://localhost:9092/admin/login
+peek --port $PORT nav http://example.com
 ```
 
 #### reload
@@ -84,7 +116,7 @@ bro --port $PORT nav http://example.com
 Reload the current page.
 
 ```bash
-bro --port $PORT reload
+peek --port $PORT reload
 ```
 
 #### back
@@ -92,7 +124,7 @@ bro --port $PORT reload
 Go back in browser history.
 
 ```bash
-bro --port $PORT back
+peek --port $PORT back
 ```
 
 #### forward
@@ -100,7 +132,7 @@ bro --port $PORT back
 Go forward in browser history.
 
 ```bash
-bro --port $PORT forward
+peek --port $PORT forward
 ```
 
 #### resize
@@ -108,9 +140,9 @@ bro --port $PORT forward
 Resize the browser window.
 
 ```bash
-bro --port $PORT resize 1280 720
-bro --port $PORT resize 375 812    # iPhone X
-bro --port $PORT resize 1920 1080  # Full HD
+peek --port $PORT resize 1280 720
+peek --port $PORT resize 375 812    # iPhone X
+peek --port $PORT resize 1920 1080  # Full HD
 ```
 
 ---
@@ -122,8 +154,8 @@ bro --port $PORT resize 1920 1080  # Full HD
 Print the accessibility tree. This is how you find elements to interact with.
 
 ```bash
-bro --port $PORT snapshot
-bro --port $PORT snap --verbose
+peek --port $PORT snapshot
+peek --port $PORT snap --verbose
 ```
 
 Output:
@@ -139,12 +171,12 @@ Use the text shown in quotes to target elements with `click`, `fill`, etc.
 
 #### screenshot (alias: ss)
 
-Take a screenshot. Defaults to `/tmp/bro.png`.
+Take a screenshot. Defaults to `/tmp/peek.png`.
 
 ```bash
-bro --port $PORT screenshot
-bro --port $PORT ss /tmp/login-page.png
-bro --port $PORT screenshot --full /tmp/full-page.png
+peek --port $PORT screenshot
+peek --port $PORT ss /tmp/login-page.png
+peek --port $PORT screenshot --full /tmp/full-page.png
 ```
 
 Options:
@@ -155,7 +187,7 @@ Options:
 Print the current page URL.
 
 ```bash
-bro --port $PORT url
+peek --port $PORT url
 ```
 
 #### html
@@ -163,8 +195,8 @@ bro --port $PORT url
 Print the page HTML source.
 
 ```bash
-bro --port $PORT html
-bro --port $PORT html > /tmp/page.html
+peek --port $PORT html
+peek --port $PORT html > /tmp/page.html
 ```
 
 ---
@@ -176,15 +208,15 @@ bro --port $PORT html > /tmp/page.html
 Click an element by its visible text. Also supports `--css` and `--id` flags for DOM-based lookup.
 
 ```bash
-bro --port $PORT click Login
-bro --port $PORT click "Save changes"
+peek --port $PORT click Login
+peek --port $PORT click "Save changes"
 
 # Click by CSS selector (useful for elements not in the accessibility tree)
-bro --port $PORT click --css ".grid-cell" "08:36"
-bro --port $PORT click --css ".btn-primary"
+peek --port $PORT click --css ".grid-cell" "08:36"
+peek --port $PORT click --css ".btn-primary"
 
 # Click by DOM id
-bro --port $PORT click --id submitBtn
+peek --port $PORT click --id submitBtn
 ```
 
 When using `--css` or `--id`, an optional text argument filters by text content (case-insensitive substring match).
@@ -194,8 +226,8 @@ When using `--css` or `--id`, an optional text argument filters by text content 
 Double-click an element. Supports `--css` and `--id` flags.
 
 ```bash
-bro --port $PORT dblclick "row content"
-bro --port $PORT dblclick --css ".editable-cell" "Total"
+peek --port $PORT dblclick "row content"
+peek --port $PORT dblclick --css ".editable-cell" "Total"
 ```
 
 #### fill
@@ -203,9 +235,9 @@ bro --port $PORT dblclick --css ".editable-cell" "Total"
 Fill an input field. First argument is the label text, rest is the value. Matches by accessible name: `<label>`, `aria-label`, or **placeholder text**.
 
 ```bash
-bro --port $PORT fill Email admin@demo.com
-bro --port $PORT fill Password 123
-bro --port $PORT fill "First name" Santiago
+peek --port $PORT fill Email admin@demo.com
+peek --port $PORT fill Password 123
+peek --port $PORT fill "First name" Santiago
 ```
 
 Zero-width characters in placeholder text are stripped automatically for matching.
@@ -215,11 +247,11 @@ Zero-width characters in placeholder text are stripped automatically for matchin
 Select a dropdown option. Works with native `<select>` and **custom widget dropdowns**. For custom widgets, it clicks to open the dropdown, waits for options to render, then clicks the matching option.
 
 ```bash
-bro --port $PORT select Country Spain
-bro --port $PORT select "Leave type" Vacation
+peek --port $PORT select Country Spain
+peek --port $PORT select "Leave type" Vacation
 
 # Works with custom widget dropdowns (e.g. React Select, S.Select)
-bro --port $PORT select "Booking type" "Green Fee 18"
+peek --port $PORT select "Booking type" "Green Fee 18"
 ```
 
 If the dropdown trigger doesn't have a standard input role (textbox, combobox), `select` falls back to finding it by visible text.
@@ -229,7 +261,7 @@ If the dropdown trigger doesn't have a standard input role (textbox, combobox), 
 Type raw text into the currently focused element.
 
 ```bash
-bro --port $PORT type "hello world"
+peek --port $PORT type "hello world"
 ```
 
 #### press
@@ -237,9 +269,9 @@ bro --port $PORT type "hello world"
 Press a keyboard key.
 
 ```bash
-bro --port $PORT press Enter
-bro --port $PORT press Tab
-bro --port $PORT press Escape
+peek --port $PORT press Enter
+peek --port $PORT press Tab
+peek --port $PORT press Escape
 ```
 
 Supported keys: `Enter`, `Tab`, `Escape`/`Esc`, `Backspace`, `Delete`, `ArrowUp`/`Up`, `ArrowDown`/`Down`, `ArrowLeft`/`Left`, `ArrowRight`/`Right`, `Space`, `Home`, `End`, `PageUp`, `PageDown`.
@@ -249,8 +281,8 @@ Supported keys: `Enter`, `Tab`, `Escape`/`Esc`, `Backspace`, `Delete`, `ArrowUp`
 Hover over an element. Supports `--css` and `--id` flags.
 
 ```bash
-bro --port $PORT hover "Settings"
-bro --port $PORT hover --css ".menu-item" "Reports"
+peek --port $PORT hover "Settings"
+peek --port $PORT hover --css ".menu-item" "Reports"
 ```
 
 #### drag
@@ -258,7 +290,7 @@ bro --port $PORT hover --css ".menu-item" "Reports"
 Drag one element to another.
 
 ```bash
-bro --port $PORT drag "Item 1" "Drop zone"
+peek --port $PORT drag "Item 1" "Drop zone"
 ```
 
 #### upload
@@ -266,7 +298,7 @@ bro --port $PORT drag "Item 1" "Drop zone"
 Upload a file to a file input. Uses a CSS selector (not text).
 
 ```bash
-bro --port $PORT upload "input[type=file]" /path/to/document.pdf
+peek --port $PORT upload "input[type=file]" /path/to/document.pdf
 ```
 
 ---
@@ -278,9 +310,9 @@ bro --port $PORT upload "input[type=file]" /path/to/document.pdf
 Wait for text to appear on the page (default timeout: 10s).
 
 ```bash
-bro --port $PORT wait Dashboard
-bro --port $PORT wait "Record saved"
-bro --port $PORT wait --timeout 30s "Processing complete"
+peek --port $PORT wait Dashboard
+peek --port $PORT wait "Record saved"
+peek --port $PORT wait --timeout 30s "Processing complete"
 ```
 
 #### wait --gone
@@ -288,7 +320,7 @@ bro --port $PORT wait --timeout 30s "Processing complete"
 Wait for text to disappear.
 
 ```bash
-bro --port $PORT wait --gone "Loading..."
+peek --port $PORT wait --gone "Loading..."
 ```
 
 #### wait --url
@@ -296,7 +328,7 @@ bro --port $PORT wait --gone "Loading..."
 Wait for the URL to contain a pattern.
 
 ```bash
-bro --port $PORT wait --url /admin/dashboard
+peek --port $PORT wait --url /admin/dashboard
 ```
 
 ---
@@ -308,7 +340,7 @@ bro --port $PORT wait --url /admin/dashboard
 List all open tabs.
 
 ```bash
-bro --port $PORT pages
+peek --port $PORT pages
 ```
 
 #### page
@@ -316,7 +348,7 @@ bro --port $PORT pages
 Switch to a tab by its index.
 
 ```bash
-bro --port $PORT page 0
+peek --port $PORT page 0
 ```
 
 #### newpage
@@ -324,7 +356,7 @@ bro --port $PORT page 0
 Open a new tab.
 
 ```bash
-bro --port $PORT newpage http://localhost:9092/admin
+peek --port $PORT newpage http://localhost:9092/admin
 ```
 
 #### closepage
@@ -332,7 +364,7 @@ bro --port $PORT newpage http://localhost:9092/admin
 Close the current tab.
 
 ```bash
-bro --port $PORT closepage
+peek --port $PORT closepage
 ```
 
 ---
@@ -344,11 +376,11 @@ bro --port $PORT closepage
 Evaluate arbitrary JavaScript. Promises are automatically awaited.
 
 ```bash
-bro --port $PORT js "document.title"
-bro --port $PORT js "document.querySelectorAll('button').length"
+peek --port $PORT js "document.title"
+peek --port $PORT js "document.querySelectorAll('button').length"
 
 # Promises are awaited automatically
-bro --port $PORT js "fetch('/api/status').then(r => r.json())"
+peek --port $PORT js "fetch('/api/status').then(r => r.json())"
 ```
 
 ---
@@ -360,9 +392,9 @@ bro --port $PORT js "fetch('/api/status').then(r => r.json())"
 Show captured console messages. On first call, installs a capture hook.
 
 ```bash
-bro --port $PORT console    # installs capture
+peek --port $PORT console    # installs capture
 # ... do something ...
-bro --port $PORT console    # shows messages
+peek --port $PORT console    # shows messages
 ```
 
 #### network (alias: net)
@@ -370,7 +402,7 @@ bro --port $PORT console    # shows messages
 Show recent network requests.
 
 ```bash
-bro --port $PORT network
+peek --port $PORT network
 ```
 
 ---
@@ -382,8 +414,8 @@ bro --port $PORT network
 Accept the next JavaScript dialog.
 
 ```bash
-bro --port $PORT dialog accept
-bro --port $PORT dialog accept "prompt text"
+peek --port $PORT dialog accept
+peek --port $PORT dialog accept "prompt text"
 ```
 
 #### dialog dismiss
@@ -391,7 +423,7 @@ bro --port $PORT dialog accept "prompt text"
 Dismiss the next dialog.
 
 ```bash
-bro --port $PORT dialog dismiss
+peek --port $PORT dialog dismiss
 ```
 
 **Note:** Call `dialog` *before* triggering the action that opens the dialog.
@@ -402,20 +434,20 @@ bro --port $PORT dialog dismiss
 
 #### test
 
-Run `.bro` test files. Each test launches its own isolated Chrome, executes commands in order, and reports pass/fail.
+Run `.peek` test files. Each test launches its own isolated Chrome, executes commands in order, and reports pass/fail.
 
 ```bash
-bro test tests/                          # run all .bro files in directory (recursive)
-bro test tests/login.bro                 # run a single test
-bro --headless test tests/               # headless mode (no browser window)
-bro -w 4 --headless test tests/          # 4 tests in parallel
+peek test tests/                          # run all .peek files in directory (recursive)
+peek test tests/login.peek                 # run a single test
+peek --headless test tests/               # headless mode (no browser window)
+peek -w 4 --headless test tests/          # 4 tests in parallel
 ```
 
 ---
 
 ## Test Files
 
-Test files use the `.bro` extension. Each file is a sequence of bro commands, one per line:
+Test files use the `.peek` extension. Each file is a sequence of peek commands, one per line:
 
 ```
 # Login with valid credentials
@@ -433,7 +465,7 @@ assert gone "Invalid credentials"
 Rules:
 - Lines starting with `#` are comments — the first one is the test name
 - Blank lines are ignored
-- Each line is a bro command (same syntax as the CLI)
+- Each line is a peek command (same syntax as the CLI)
 - `assert` commands verify conditions with automatic retry (default timeout: 10s)
 
 ### Assert Commands
@@ -544,9 +576,9 @@ assert js "document.title.includes('Dashboard')"
 ### Output
 
 ```
-PASS  login_ok.bro — Login with valid credentials (1.2s)
-PASS  create_user.bro — Create a new user (3.4s)
-FAIL  delete_record.bro:12 — assert text: "Record deleted" not found
+PASS  login_ok.peek — Login with valid credentials (1.2s)
+PASS  create_user.peek — Create a new user (3.4s)
+FAIL  delete_record.peek:12 — assert text: "Record deleted" not found
 
 3 tests, 2 passed, 1 failed (4.8s)
 ```
@@ -555,31 +587,31 @@ FAIL  delete_record.bro:12 — assert text: "Record deleted" not found
 
 ## Multiple Sessions
 
-Each `bro open` launches a separate Chrome instance with its own port and profile directory. Sessions are fully isolated — no shared cookies, localStorage, or state.
+Each `peek open` launches a separate Chrome instance with its own port and profile directory. Sessions are fully isolated — no shared cookies, localStorage, or state.
 
 ```bash
 # Terminal 1
-PORT=$(bro open http://localhost:9092/admin/login)
-bro --port $PORT fill Email admin@demo.com
-bro --port $PORT click Login
-bro --port $PORT close
+PORT=$(peek open http://localhost:9092/admin/login)
+peek --port $PORT fill Email admin@demo.com
+peek --port $PORT click Login
+peek --port $PORT close
 
 # Terminal 2 (runs in parallel, completely isolated)
-PORT=$(bro open http://localhost:9092/admin/login)
-bro --port $PORT fill Email other@demo.com
-bro --port $PORT click Login
-bro --port $PORT close
+PORT=$(peek open http://localhost:9092/admin/login)
+peek --port $PORT fill Email other@demo.com
+peek --port $PORT click Login
+peek --port $PORT close
 ```
 
 ## How It Works
 
-- `bro open` launches Chrome with `--remote-debugging-port` and a unique `--user-data-dir` per port
+- `peek open` launches Chrome with `--remote-debugging-port` and a unique `--user-data-dir` per port
 - All commands connect via WebSocket to Chrome's DevTools Protocol, act, and exit
 - Element lookup uses Chrome's **accessibility tree** by default — reliable with any framework
 - `--css` and `--id` flags use DOM selectors as an alternative for elements not in the AX tree
 - Interactive elements (buttons, links) are prioritized over static text when names match
 - Zero-width characters in element names/placeholders are stripped for robust matching
-- `bro js` uses `Runtime.evaluate` with `awaitPromise` so Promises resolve automatically
-- `bro close` sends a close command via CDP to cleanly shut down the Chrome instance
+- `peek js` uses `Runtime.evaluate` with `awaitPromise` so Promises resolve automatically
+- `peek close` sends a close command via CDP to cleanly shut down the Chrome instance
 
 Built on [Rod](https://github.com/go-rod/rod).

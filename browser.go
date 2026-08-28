@@ -54,7 +54,7 @@ func connect(ctx *cmdContext) (*rod.Browser, *rod.Page, error) {
 func connectBrowser(ctx *cmdContext) (*rod.Browser, error) {
 	u, err := launcher.ResolveURL(fmt.Sprintf("localhost:%d", ctx.port))
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to Chrome on port %d: %w\nRun: bro open", ctx.port, err)
+		return nil, fmt.Errorf("cannot connect to Chrome on port %d: %w\nRun: peek open", ctx.port, err)
 	}
 
 	browser := rod.New().ControlURL(u).NoDefaultDevice()

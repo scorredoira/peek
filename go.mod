@@ -1,4 +1,4 @@
-module github.com/scorredoira/bro
+module github.com/scorredoira/peek
 
 go 1.26.1
 

@@ -23,19 +23,19 @@ var (
 	startedProcs []*os.Process
 )
 
-type broTest struct {
+type peekTest struct {
 	name  string
 	file  string
-	lines []broLine
+	lines []peekLine
 }
 
-type broLine struct {
+type peekLine struct {
 	num  int
 	text string
 }
 
 type testResult struct {
-	test   *broTest
+	test   *peekTest
 	passed bool
 	err    error
 	line   int
@@ -69,7 +69,7 @@ func cmdTest(ctx *cmdContext, args []string) error {
 	}
 
 	if len(paths) == 0 {
-		return fmt.Errorf("usage: bro test <file.bro|dir> [-w N] [--headless]")
+		return fmt.Errorf("usage: peek test <file.peek|dir> [-w N] [--headless]")
 	}
 
 	// Collect test files.
@@ -84,7 +84,7 @@ func cmdTest(ctx *cmdContext, args []string) error {
 				if err != nil {
 					return nil
 				}
-				if !d.IsDir() && strings.HasSuffix(path, ".bro") {
+				if !d.IsDir() && strings.HasSuffix(path, ".peek") {
 					files = append(files, path)
 				}
 				return nil
@@ -95,11 +95,11 @@ func cmdTest(ctx *cmdContext, args []string) error {
 	}
 
 	if len(files) == 0 {
-		return fmt.Errorf("no .bro test files found")
+		return fmt.Errorf("no .peek test files found")
 	}
 
 	// Parse all test files.
-	tests := make([]*broTest, len(files))
+	tests := make([]*peekTest, len(files))
 	for i, f := range files {
 		t, err := parseTestFile(f)
 		if err != nil {
@@ -125,7 +125,7 @@ func cmdTest(ctx *cmdContext, args []string) error {
 
 	for _, t := range tests {
 		wg.Add(1)
-		go func(t *broTest) {
+		go func(t *peekTest) {
 			defer wg.Done()
 			sem <- struct{}{}
 			r := runTest(headless, t)
@@ -174,14 +174,14 @@ func cmdTest(ctx *cmdContext, args []string) error {
 	return nil
 }
 
-func parseTestFile(path string) (*broTest, error) {
+func parseTestFile(path string) (*peekTest, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	t := &broTest{
+	t := &peekTest{
 		file: path,
 	}
 
@@ -199,13 +199,13 @@ func parseTestFile(path string) (*broTest, error) {
 			}
 			continue
 		}
-		t.lines = append(t.lines, broLine{num: lineNum, text: line})
+		t.lines = append(t.lines, peekLine{num: lineNum, text: line})
 	}
 
 	return t, scanner.Err()
 }
 
-func runTest(headless bool, t *broTest) testResult {
+func runTest(headless bool, t *peekTest) testResult {
 	start := time.Now()
 
 	// Allocate a unique port for this test.

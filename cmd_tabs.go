@@ -32,7 +32,7 @@ func cmdPages(ctx *cmdContext) error {
 
 func cmdPage(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bro page <index>")
+		return fmt.Errorf("usage: peek page <index>")
 	}
 
 	idx, err := strconv.Atoi(args[0])

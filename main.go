@@ -166,14 +166,14 @@ func main() {
 }
 
 func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "bro: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "peek: "+format+"\n", args...)
 	os.Exit(1)
 }
 
 func printUsage() {
-	fmt.Print(`bro — browser remote operator
+	fmt.Print(`peek — browser remote operator
 
-Usage: bro [--port PORT] [--headless] [-w N] <command> [args...]
+Usage: peek [--port PORT] [--headless] [-w N] <command> [args...]
 
 Chrome:
   open [url]            Launch Chrome, print port number
@@ -188,7 +188,7 @@ Navigation:
 
 Inspection:
   snapshot [--verbose]  Print accessibility tree
-  screenshot [path]     Take screenshot (default: /tmp/bro.png)
+  screenshot [path]     Take screenshot (default: /tmp/peek.png)
   url                   Print current URL
   html                  Print page HTML
 
@@ -227,16 +227,16 @@ Dialogs:
   dialog dismiss        Dismiss dialog
 
 Testing:
-  test <path> [-w N]  Run .bro test files (recursive)
+  test <path> [-w N]  Run .peek test files (recursive)
 
 Utilities:
   texts --css <sel>     List texts of matching elements
   freeport              Print a free TCP port number
 
 Session:
-  PORT=$(bro open http://localhost:9092/admin)
-  bro --port $PORT fill Email admin@demo.com
-  bro --port $PORT click Login
+  PORT=$(peek open http://localhost:9092/admin)
+  peek --port $PORT fill Email admin@demo.com
+  peek --port $PORT click Login
 
 Default port: 9222
 `)

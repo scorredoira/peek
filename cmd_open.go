@@ -37,7 +37,7 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 	}
 
 	// Each port gets its own profile dir for full isolation.
-	dataDir := filepath.Join(os.TempDir(), fmt.Sprintf("bro-chrome-%d", port))
+	dataDir := filepath.Join(os.TempDir(), fmt.Sprintf("peek-chrome-%d", port))
 
 	// Disable password manager via Chrome preferences.
 	defaultDir := filepath.Join(dataDir, "Default")
@@ -75,7 +75,7 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 
 	// Launched BLANK, and navigated below once a session exists. Handing Chrome the url here
 	// means it is already loading before anything can attach, so the first document — the one
-	// you opened bro to look at — is the one document nothing is watching: its console, its
+	// you opened peek to look at — is the one document nothing is watching: its console, its
 	// throw on the way in, its data call that 404s, all gone before the first command runs.
 	//
 	// about:blank rather than no url at all: with none, Chrome shows the new-tab page, which

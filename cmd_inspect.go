@@ -106,7 +106,7 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	path := "/tmp/bro.jpg"
+	path := "/tmp/peek.jpg"
 	fullPage := false
 	quality := 80
 	format := proto.PageCaptureScreenshotFormatJpeg
@@ -124,8 +124,8 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 			}
 		case "--png":
 			format = proto.PageCaptureScreenshotFormatPng
-			if path == "/tmp/bro.jpg" {
-				path = "/tmp/bro.png"
+			if path == "/tmp/peek.jpg" {
+				path = "/tmp/peek.png"
 			}
 		default:
 			path = args[i]
