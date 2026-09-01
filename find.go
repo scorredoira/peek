@@ -299,7 +299,12 @@ type elementQuery struct {
 
 // parseElementArgs extracts --css, --id, and --index flags from args.
 // Remaining args are joined as the text filter.
-func parseElementArgs(args []string) elementQuery {
+//
+// A flag with no value, or an --index that is not a number, is an ERROR and never a
+// shrug: dropping it silently leaves the command targeting by text instead, which
+// finds SOME element and acts on it. Acting on the wrong element while reporting
+// success is the one thing this tool exists not to do.
+func parseElementArgs(args []string) (elementQuery, error) {
 	var q elementQuery
 	q.index = -1
 	var rest []string
@@ -307,30 +312,34 @@ func parseElementArgs(args []string) elementQuery {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--css":
-			if i+1 < len(args) {
-				q.css = args[i+1]
-				i++
+			if i+1 >= len(args) {
+				return q, fmt.Errorf("--css needs a selector")
 			}
+			q.css = args[i+1]
+			i++
 		case "--id":
-			if i+1 < len(args) {
-				q.id = args[i+1]
-				i++
+			if i+1 >= len(args) {
+				return q, fmt.Errorf("--id needs an id")
 			}
+			q.id = args[i+1]
+			i++
 		case "--index":
-			if i+1 < len(args) {
-				n, err := strconv.Atoi(args[i+1])
-				if err == nil {
-					q.index = n
-				}
-				i++
+			if i+1 >= len(args) {
+				return q, fmt.Errorf("--index needs a number")
 			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return q, fmt.Errorf("--index: %q is not a number", args[i+1])
+			}
+			q.index = n
+			i++
 		default:
 			rest = append(rest, args[i])
 		}
 	}
 
 	q.textFilter = strings.Join(rest, " ")
-	return q
+	return q, nil
 }
 
 // findElement finds an element using the parsed query.

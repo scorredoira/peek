@@ -36,6 +36,9 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 		return nil
 	}
 
+	// A fresh Chrome inherits no tab choice from whatever ran on this port before.
+	forgetTab(port)
+
 	// Each port gets its own profile dir for full isolation.
 	dataDir := filepath.Join(os.TempDir(), fmt.Sprintf("peek-chrome-%d", port))
 
@@ -113,6 +116,13 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 				return fmt.Errorf("chrome started but could not be driven: %w", err)
 			}
 
+			// This tab IS the session. Naming it here is what stops every later command
+			// from re-deriving one from the order Chrome happens to list its targets in —
+			// an order nothing documents, and which a popup reshuffles.
+			if err := rememberTab(port, string(page.TargetID)); err != nil {
+				return fmt.Errorf("cannot remember the session tab: %w", err)
+			}
+
 			if err := page.Navigate(url); err != nil {
 				return fmt.Errorf("navigate failed: %w", err)
 			}
@@ -140,6 +150,8 @@ func cmdClose(ctx *cmdContext) error {
 	if err := browser.Close(); err != nil {
 		return fmt.Errorf("failed to close Chrome: %w", err)
 	}
+
+	forgetTab(ctx.port)
 
 	fmt.Printf("Chrome on port %d closed\n", ctx.port)
 	return nil

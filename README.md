@@ -104,12 +104,16 @@ peek --port 9223 close        # close Chrome on port 9223
 
 #### navigate (alias: nav)
 
-Go to a URL. Waits for the page to load.
+Go to a URL. Waits for the page to load, then prints where it landed.
 
 ```bash
 peek --port $PORT navigate http://localhost:9092/admin/login
 peek --port $PORT nav http://example.com
 ```
+
+**A page that answered 4xx or 5xx is an error, not a URL.** A 404 or a 500 navigates
+perfectly — the document loads and the URL prints — so without this every screenshot after
+it is of the server's error page and nothing said so. `reload` reports the same way.
 
 #### reload
 
@@ -171,16 +175,29 @@ Use the text shown in quotes to target elements with `click`, `fill`, etc.
 
 #### screenshot (alias: ss)
 
-Take a screenshot. Defaults to `/tmp/peek.png`.
+Take a screenshot. Defaults to `/tmp/peek.jpg` (`/tmp/peek.png` for a PNG).
 
 ```bash
 peek --port $PORT screenshot
 peek --port $PORT ss /tmp/login-page.png
 peek --port $PORT screenshot --full /tmp/full-page.png
+peek --port $PORT screenshot --css ".DataList" --scale 3 /tmp/list.png
+peek --port $PORT screenshot --clip 40,120,600,300 --scale 2 /tmp/detail.png
 ```
 
 Options:
 - `--full` — capture the entire page (scroll included)
+- `--css <sel>` — capture only that element, scrolled into view
+- `--clip x,y,w,h` — capture that region of the viewport, in CSS pixels
+- `--scale N` — re-render the region at N times the size
+- `--png` — PNG instead of JPEG
+- `--quality N` — JPEG quality (default 80)
+
+`--css` and `--clip` are exclusive, and neither combines with `--full`. Chrome
+re-renders the region at the requested scale rather than upscaling the raster,
+so small text stays sharp — that is what makes this a zoom and not a crop of a
+blurry picture. Any capture that crops or scales is written as PNG, because
+JPEG artifacts are exactly what you would be looking at up close.
 
 #### url
 
@@ -198,6 +215,33 @@ Print the page HTML source.
 peek --port $PORT html
 peek --port $PORT html > /tmp/page.html
 ```
+
+#### styles (alias: style)
+
+Print how an element is actually painted: its box, resolved colors and font, and the
+four ways it can be there without being readable.
+
+```bash
+peek --port $PORT styles --css ".PageHeader h1"
+peek --port $PORT styles "Save"
+```
+
+```
+tag         h1
+classes     PageHeader-title
+box         525x127 at 74,116
+text        Bookings
+display     block
+visibility  visible
+opacity     1
+...
+clipped:   its content overflows the box and is being cut off
+```
+
+The warnings at the end are the point — `hidden`, `empty` (a zero-size box),
+`offScreen`, and `clipped` (the text is genuinely cut off, not merely spilling out of
+a box that does not clip). A screenshot cannot tell you any of them, and every
+affirmative line peek prints implies there is nothing left to check.
 
 ---
 
@@ -221,6 +265,20 @@ peek --port $PORT click --id submitBtn
 
 When using `--css` or `--id`, an optional text argument filters by text content (case-insensitive substring match).
 
+**It refuses a press a person could not make.** Before anything is dispatched the element is
+scrolled into view and checked: disabled (including `aria-disabled` and a disabled
+`<fieldset>`), not rendered, invisible, fully transparent, zero-sized, click-through, still
+outside the viewport, or covered by something else. Each of those is an error naming what is
+in the way, never a `clicked` line.
+
+**And it dispatches what a real press dispatches** — `pointerdown`, `mousedown`, `pointerup`,
+`mouseup`, then the native activation. `element.click()` alone fires one `click` event and no
+pointer or mouse events at all, so every control that opens on `mousedown` (most custom
+dropdowns, menus, drag handles) did nothing while peek printed success.
+
+The same gate covers `rightclick`, `dblclick` and `hover`. Hovering a disabled control is
+allowed — that is how its tooltip is read — so only being unseeable or covered refuses there.
+
 #### dblclick
 
 Double-click an element. Supports `--css` and `--id` flags.
@@ -238,9 +296,23 @@ Fill an input field. First argument is the label text, rest is the value. Matche
 peek --port $PORT fill Email admin@demo.com
 peek --port $PORT fill Password 123
 peek --port $PORT fill "First name" Santiago
+peek --port $PORT fill --name email admin@demo.com   # by the name attribute
+peek --port $PORT fill --css "#search" bookings      # by selector
 ```
 
 Zero-width characters in placeholder text are stripped automatically for matching.
+
+**It reads the value back, and says what the field really holds.** Three outcomes:
+
+- The value landed as typed — `filled "Email" = "admin@demo.com"`.
+- The widget reformatted it — `filled "Total" = "1000" — the field shows "1.000,00 €"`.
+  That is the widget working, so it succeeds; you are told because it may not be what
+  you meant.
+- Nothing landed — the field is still empty, and that is an error, not a success.
+
+A **disabled, readonly or invisible** field is refused before anything is typed. Typing
+into one is a no-op that used to print `filled` and leave the next step building on a
+value that was never set.
 
 #### select
 
@@ -307,21 +379,33 @@ peek --port $PORT upload "input[type=file]" /path/to/document.pdf
 
 #### wait
 
-Wait for text to appear on the page (default timeout: 10s).
+Wait for text or an element to appear on the page (default timeout: 10s).
 
 ```bash
 peek --port $PORT wait Dashboard
 peek --port $PORT wait "Record saved"
 peek --port $PORT wait --timeout 30s "Processing complete"
+peek --port $PORT wait --css ".DataList tbody tr"      # an element
+peek --port $PORT wait --css ".Total" "1.240,00"       # text inside one
 ```
+
+Text is looked for in the accessibility tree **and** in the page's rendered text, plus
+the value of every input. So a table cell, a badge, a plain `<span>` and what you just
+typed into a field all count as on screen — the tree alone missed all of those.
 
 #### wait --gone
 
-Wait for text to disappear.
+Wait for text or an element to **disappear**.
 
 ```bash
 peek --port $PORT wait --gone "Loading..."
+peek --port $PORT wait --gone --css ".Spinner"
 ```
+
+**It has to see the thing first.** If what you name was never there, the command fails
+saying so rather than returning instantly. Otherwise the usual idiom — click Save, wait
+for the spinner to go — passes before the spinner has even rendered, and waiting for
+nothing reads as proof the operation finished.
 
 #### wait --url
 
@@ -337,19 +421,31 @@ peek --port $PORT wait --url /admin/dashboard
 
 #### pages
 
-List all open tabs.
+List all open tabs. The `*` marks the one every command acts on.
 
 ```bash
 peek --port $PORT pages
 ```
 
+```
+  [0] https://example.com/popup
+* [1] https://example.com/
+```
+
 #### page
 
-Switch to a tab by its index.
+Switch to a tab by its index. **The choice is remembered** — every later command acts on it
+until you switch again or close it.
 
 ```bash
 peek --port $PORT page 0
 ```
+
+Which tab peek drives used to be re-derived from the tail of Chrome's target list on every
+single command, so a click that opened a popup silently moved everything onto the popup — or
+failed to, equally invisibly — and the form you thought you were verifying was in the other
+tab. `peek open` now names its tab, `newpage` claims the tab it creates, and a popup the page
+opened by itself never steals the session.
 
 #### newpage
 
@@ -389,21 +485,42 @@ peek --port $PORT js "fetch('/api/status').then(r => r.json())"
 
 #### console
 
-Show captured console messages. On first call, installs a capture hook.
+Show what the page said about itself. The capture is installed by every command, before the
+page's own scripts run.
 
 ```bash
-peek --port $PORT console    # installs capture
-# ... do something ...
-peek --port $PORT console    # shows messages
+peek --port $PORT console
 ```
+
+It carries more than `console.log`: uncaught exceptions, unhandled promise rejections, fetch
+and XHR calls that failed with their status, CSP violations, and a `<script>`, `<img>` or
+`<link>` that failed to load — that last family fires on the element and never bubbles, so a
+missing bundle or a 404'd stylesheet used to be invisible everywhere and the page just
+rendered unstyled.
+
+**Errors survive a navigation.** The log lives in the page, so a full page load wiped it:
+sign in, land on the next screen, and the exception that broke the sign-in page was gone.
+Errors are now carried across in the tab's session storage.
 
 #### network (alias: net)
 
-Show recent network requests.
+Show recent network requests **with their HTTP status**, and count the failures.
 
 ```bash
 peek --port $PORT network
 ```
+
+```
+200       143ms  css      22.8KB  https://example.com/styles.css
+404 !     49ms   fetch    526B    https://example.com/api/rows
+BLOCKED   0ms    fetch    0B      http://127.0.0.1:1/dead
+
+1 of these requests FAILED — a screen can render perfectly on failed data
+```
+
+`BLOCKED` is a request that never got a response at all: refused by CORS or CSP, or a
+dead host. When nothing failed it says so, so an empty-looking screen with a healthy
+list points you elsewhere.
 
 ---
 
@@ -420,13 +537,35 @@ peek --port $PORT dialog accept "prompt text"
 
 #### dialog dismiss
 
-Dismiss the next dialog.
+Dismiss dialogs.
 
 ```bash
 peek --port $PORT dialog dismiss
 ```
 
-**Note:** Call `dialog` *before* triggering the action that opens the dialog.
+#### dialog
+
+With no argument, show what the page has actually asked.
+
+```bash
+peek --port $PORT dialog
+```
+
+```
+confirm: Delete this invoice? → dismissed
+prompt: New name? → Santiago
+```
+
+**Dialogs are answered by default, and the default answer is no.** A native
+`alert`/`confirm`/`prompt` blocks the renderer and a CLI has nobody there to press a button:
+the page freezes and the next command times out complaining about something unrelated. So
+peek answers them in the page and records them. Auto-accepting would press OK on "Delete
+everything?" while nobody was looking, which is why `dialog accept` is something you say
+explicitly. The choice is remembered for the tab, so setting it once holds for the commands
+that follow.
+
+Reading the log back is the other half: setting an answer proves nothing, and `peek dialog`
+is how you check the confirm before a delete was really there.
 
 ---
 
@@ -477,8 +616,20 @@ Rules:
 | `assert gone <text>` | Text is NOT on the page |
 | `assert title <text>` | Page title contains text |
 | `assert js <expression>` | JavaScript expression returns truthy |
+| `assert clean` | The page has reported no errors up to this point |
 
 Assertions retry automatically until they pass or timeout. No need for explicit waits or sleeps between actions and assertions.
+
+**A test fails if the page reported an error, whether or not you asserted it.** Passing used
+to mean only "no command returned an error" — a test could navigate, click through a form and
+pass with a stack trace behind it and every data call at 500. The captured errors are printed
+under the failure. `assert clean` is for saying WHERE: put it after the step you suspect and
+the failure names that line instead of the last one.
+
+`start :PORT ...` **refuses a server this run did not start.** Sharing one server between
+parallel test files is the point and still works; what is refused is a leftover from a
+previous run, which is very likely a previous build — reusing it silently is how a whole
+suite goes green against code that was never run.
 
 Override the default 10s timeout:
 

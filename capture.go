@@ -18,8 +18,8 @@ import (
 //     that renders perfectly and is empty, which a screenshot cannot tell from "no rows yet".
 //
 // Both of those are invisible to a console patch, and both are how a screen that looks right
-// turns out to be broken. `peek network` cannot answer it either: it reads
-// performance.getEntriesByType("resource"), which lists what was requested and not how it went.
+// turns out to be broken. `peek network` reports the status of a request that got a response;
+// a throw and a rejected promise reach nothing but this.
 //
 // It is idempotent and cheap, so every command that touches a page installs it without asking.
 //
@@ -30,12 +30,44 @@ import (
 const captureBody = `
 	if (window.__peekCapture) { return }
 	window.__peekCapture = true
-	window.__peekConsole = window.__peekConsole || []
+
+	// The resource timing buffer holds 250 entries by default and then silently drops
+	// every later one — on a screen that keeps fetching, what "peek network" shows is the
+	// page loading and never the call that just failed.
+	if (performance.setResourceTimingBufferSize) { performance.setResourceTimingBufferSize(1000) }
+
+	const store = {
+		read: key => {
+			try { return JSON.parse(sessionStorage.getItem(key)) } catch (e) { return null }
+		},
+		write: (key, value) => {
+			try { sessionStorage.setItem(key, JSON.stringify(value)) } catch (e) { }
+		},
+	}
+
+	// Errors survive the navigation that caused them. The log lives in the page, so a full
+	// page load used to wipe it — sign in, land on the next screen, and the exception that
+	// broke the sign-in page was gone before anyone could ask. Only errors are carried
+	// across: they are what you still want one page later, and writing every log line back
+	// on a page in a render loop would cost more than it is worth.
+	//
+	// They are kept in their own list as well as in the log, so a page throwing in a loop
+	// does not re-scan and re-serialize the whole log on every single throw.
+	window.__peekErrors = store.read("__peekErrors") || []
+	window.__peekConsole = window.__peekErrors.slice()
 
 	const keep = (level, text) => {
-		window.__peekConsole.push({ level: level, text: String(text).slice(0, 2000) })
+		const entry = { level: level, text: String(text).slice(0, 2000) }
+
+		window.__peekConsole.push(entry)
 		// Bounded: a page in a render loop must not grow this without limit.
 		if (window.__peekConsole.length > 500) { window.__peekConsole.shift() }
+
+		if (level === "error") {
+			window.__peekErrors.push(entry)
+			if (window.__peekErrors.length > 100) { window.__peekErrors.shift() }
+			store.write("__peekErrors", window.__peekErrors)
+		}
 	}
 
 	const orig = {}
@@ -51,12 +83,28 @@ const captureBody = `
 		}
 	})
 
+	// capture:true is what makes this hear a <script>, <img> or <link> that failed to load:
+	// those fire on the element and never bubble, so a listener without it hears only
+	// uncaught exceptions. A missing bundle or a 404'd stylesheet was invisible to both
+	// this and "peek network", and the page just rendered unstyled.
 	addEventListener('error', e => {
-		keep('error', 'uncaught: ' + (e.error && e.error.stack ? e.error.stack : e.message))
-	})
+		if (e.target && e.target !== window && e.target.tagName) {
+			const src = e.target.src || e.target.href || ""
+			keep('error', 'failed to load ' + e.target.tagName.toLowerCase() + ' ' + src)
+			return
+		}
+		if (e.error && e.error.stack) { keep('error', 'uncaught: ' + e.error.stack); return }
+		keep('error', 'uncaught: ' + (e.message || "an error with no message"))
+	}, true)
+
 	addEventListener('unhandledrejection', e => {
 		const r = e.reason
 		keep('error', 'unhandled rejection: ' + (r && r.stack ? r.stack : r))
+	})
+
+	addEventListener('securitypolicyviolation', e => {
+		keep('error', 'CSP blocked ' + (e.blockedURI || "something") +
+			' (' + e.violatedDirective + ')')
 	})
 
 	const failed = (what, url, detail) => keep('error', what + ' ' + url + ' — ' + detail)
@@ -80,6 +128,47 @@ const captureBody = `
 		})
 		this.addEventListener('error', () => failed('xhr', url, 'network error'))
 		return openOrig.call(this, method, url, ...rest)
+	}
+
+	// A native alert/confirm/prompt BLOCKS the renderer, and a CLI has nobody there to
+	// answer it: the page freezes and the next command times out with an error about
+	// something else entirely. Answering them here keeps the page moving and, more to the
+	// point, RECORDS what was asked — so "did it warn before deleting?" has an answer.
+	//
+	// The default answer is no. Auto-accepting would press OK on "Delete everything?"
+	// while nobody was looking; "peek dialog accept" is how you say otherwise, and it is
+	// remembered for the tab.
+	window.__peekDialogs = store.read("__peekDialogs") || []
+
+	const askedDialog = (kind, message, answer) => {
+		window.__peekDialogs.push({
+			kind: kind,
+			message: String(message === undefined ? "" : message).slice(0, 500),
+			answered: String(answer),
+		})
+		if (window.__peekDialogs.length > 100) { window.__peekDialogs.shift() }
+		store.write("__peekDialogs", window.__peekDialogs)
+	}
+
+	const policy = () => store.read("__peekDialogPolicy") || { accept: false, text: "" }
+
+	window.alert = message => { askedDialog("alert", message, "dismissed") }
+
+	window.confirm = message => {
+		const answer = policy().accept
+		askedDialog("confirm", message, answer ? "accepted" : "dismissed")
+		return answer
+	}
+
+	window.prompt = (message, fallback) => {
+		const p = policy()
+		if (!p.accept) {
+			askedDialog("prompt", message, "dismissed")
+			return null
+		}
+		const answer = p.text !== "" ? p.text : (fallback === undefined ? "" : fallback)
+		askedDialog("prompt", message, answer)
+		return answer
 	}
 `
 

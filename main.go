@@ -90,6 +90,8 @@ func main() {
 		err = cmdURL(ctx)
 	case "html":
 		err = cmdHTML(ctx)
+	case "styles", "style":
+		err = cmdStyles(ctx, cmdArgs)
 
 	// Interaction
 	case "click":
@@ -188,7 +190,14 @@ Navigation:
 
 Inspection:
   snapshot [--verbose]  Print accessibility tree
-  screenshot [path]     Take screenshot (default: /tmp/peek.png)
+  screenshot [path] [--full] [--png] [--quality N]
+             [--css sel | --clip x,y,w,h] [--scale N]
+                        Screenshot (default: /tmp/peek.jpg). --css or --clip
+                        captures one region, --scale re-renders it bigger:
+                        the way to read small text on a dense screen.
+  styles [--css sel] [--id id] [text]
+                        Computed box, colors and font of one element, and
+                        whether it is hidden, off screen or its text is cut off
   url                   Print current URL
   html                  Print page HTML
 
@@ -210,8 +219,8 @@ Waits:
   wait --url <pattern>  Wait for URL to match
 
 Tabs:
-  pages                 List open tabs
-  page <id>             Switch to tab by index
+  pages                 List open tabs (* marks the one in use)
+  page <index>          Switch to that tab, and stay there
   newpage [url]         Open new tab
   closepage             Close current tab
 
@@ -223,8 +232,9 @@ Debug:
   network               Show network requests
 
 Dialogs:
-  dialog accept [text]  Accept dialog (optional input for prompts)
-  dialog dismiss        Dismiss dialog
+  dialog                Show what the page asked (alert / confirm / prompt)
+  dialog accept [text]  Answer yes from now on (optional input for prompts)
+  dialog dismiss        Answer no from now on (the default)
 
 Testing:
   test <path> [-w N]  Run .peek test files (recursive)

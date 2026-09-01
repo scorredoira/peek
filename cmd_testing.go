@@ -21,6 +21,7 @@ import (
 var (
 	startedMu    sync.Mutex
 	startedProcs []*os.Process
+	startedPorts = map[int]bool{}
 )
 
 type peekTest struct {
@@ -35,11 +36,12 @@ type peekLine struct {
 }
 
 type testResult struct {
-	test   *peekTest
-	passed bool
-	err    error
-	line   int
-	dur    time.Duration
+	test       *peekTest
+	passed     bool
+	err        error
+	line       int
+	dur        time.Duration
+	pageErrors []string
 }
 
 var testPortNext int32 = 10222
@@ -146,6 +148,9 @@ func cmdTest(ctx *cmdContext, args []string) error {
 					loc = fmt.Sprintf("%s:%d", r.test.file, r.line)
 				}
 				fmt.Fprintf(origStdout, "FAIL  %s — %v\n", loc, r.err)
+				for _, e := range r.pageErrors {
+					fmt.Fprintf(origStdout, "        page: %s\n", e)
+				}
 			}
 			printMu.Unlock()
 		}(t)
@@ -323,13 +328,40 @@ func runTest(headless bool, t *peekTest) testResult {
 		}
 
 		if err != nil {
+			thrown, _ := pageErrors(ctx, chromeStarted)
 			return testResult{
-				test:   t,
-				passed: false,
-				err:    err,
-				line:   line.num,
-				dur:    time.Since(start),
+				test:       t,
+				passed:     false,
+				err:        err,
+				line:       line.num,
+				dur:        time.Since(start),
+				pageErrors: thrown,
 			}
+		}
+	}
+
+	// A test that ran every step without a Go error has proved that its selectors still
+	// resolve, and nothing else. The page may have thrown on the way in, lost a bundle to
+	// a 404 and answered every data call with a 500 — peek captured all of it, and not
+	// reading it back was the difference between a suite that proves the UI works and one
+	// that proves it is still clickable.
+	thrown, err := pageErrors(ctx, chromeStarted)
+	if err != nil {
+		return testResult{
+			test:   t,
+			passed: false,
+			err:    err,
+			dur:    time.Since(start),
+		}
+	}
+
+	if len(thrown) > 0 {
+		return testResult{
+			test:       t,
+			passed:     false,
+			err:        fmt.Errorf("the page reported %d error(s)", len(thrown)),
+			dur:        time.Since(start),
+			pageErrors: thrown,
 		}
 	}
 
@@ -340,10 +372,46 @@ func runTest(headless bool, t *peekTest) testResult {
 	}
 }
 
+// pageErrors reads back what the page said about itself while the test ran.
+//
+// Failing to READ them is not the same as there being none: answering "clean" because the
+// browser could not be asked is the exact false green this check exists to remove, so the
+// failure travels and the test fails on it.
+func pageErrors(ctx *cmdContext, chromeStarted bool) ([]string, error) {
+	if !chromeStarted {
+		return nil, nil
+	}
+
+	_, page, err := connect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cannot ask the page what went wrong: %w", err)
+	}
+
+	res, err := page.Eval(`() => {
+		if (!window.__peekErrors) { return [] }
+		return window.__peekErrors.map(m => m.text)
+	}`)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the page's errors: %w", err)
+	}
+
+	raw, ok := res.Value.Val().([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("cannot read the page's errors")
+	}
+
+	var errors []string
+	for _, e := range raw {
+		errors = append(errors, fmt.Sprint(e))
+	}
+
+	return errors, nil
+}
+
 // execAssert runs an assertion with automatic retry until timeout.
 func execAssert(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean> <value>")
 	}
 
 	timeout := defaultTimeout
@@ -361,8 +429,12 @@ func execAssert(ctx *cmdContext, args []string) error {
 		}
 	}
 
+	if args[0] == "clean" {
+		return assertClean(ctx)
+	}
+
 	if len(args) < 2 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean> <value>")
 	}
 
 	kind := args[0]
@@ -382,6 +454,23 @@ func execAssert(ctx *cmdContext, args []string) error {
 	default:
 		return fmt.Errorf("unknown assert: %s", kind)
 	}
+}
+
+// assertClean fails when the page has reported anything wrong up to this point.
+//
+// A whole test is checked for this at the end anyway; this is for saying WHERE. Put it
+// after the step you suspect and the failure names that line instead of the last one.
+func assertClean(ctx *cmdContext) error {
+	thrown, err := pageErrors(ctx, true)
+	if err != nil {
+		return err
+	}
+	if len(thrown) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("assert clean: the page reported %d error(s): %s",
+		len(thrown), strings.Join(thrown, " | "))
 }
 
 func assertURL(ctx *cmdContext, pattern string, timeout time.Duration) error {
@@ -607,26 +696,48 @@ func execStart(rawLine string) error {
 		return fmt.Errorf("usage: start :PORT command...")
 	}
 
-	// If port already responds, reuse the running server.
-	if isPortOpen(port) {
-		return nil
+	// Tests share one server on purpose: several files run in parallel and the first one
+	// to get here starts it. What must NOT be reused is a server this run did not start —
+	// left over from a previous run, and very likely the previous BUILD. Reusing that one
+	// silently is how a whole suite passes green against code that was never run.
+	startedMu.Lock()
+
+	if startedPorts[port] {
+		startedMu.Unlock()
+		return waitForPort(port)
 	}
 
-	// Start command in background.
+	if isPortOpen(port) {
+		startedMu.Unlock()
+		return fmt.Errorf("start: something is already listening on port %d and this run did "+
+			"not start it — kill it first, or the tests run against whatever that is", port)
+	}
+
 	cmd := exec.Command("sh", "-c", shell)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
+		startedMu.Unlock()
 		return fmt.Errorf("start: failed to run %q: %w", shell, err)
 	}
 
-	startedMu.Lock()
 	startedProcs = append(startedProcs, cmd.Process)
+	startedPorts[port] = true
 	startedMu.Unlock()
 
-	// Wait for the port to accept HTTP connections.
+	if err := waitForPort(port); err != nil {
+		cmd.Process.Kill()
+		return err
+	}
+
+	return nil
+}
+
+// waitForPort waits until the port answers HTTP.
+func waitForPort(port int) error {
 	client := &http.Client{Timeout: 1 * time.Second}
 	deadline := time.Now().Add(5 * time.Second)
+
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err == nil {
@@ -636,7 +747,6 @@ func execStart(rawLine string) error {
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	cmd.Process.Kill()
 	return fmt.Errorf("start: port %d not ready after 5s", port)
 }
 

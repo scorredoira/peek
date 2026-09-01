@@ -9,24 +9,30 @@ import (
 )
 
 func cmdPages(ctx *cmdContext) error {
-	browser, err := connectBrowser(ctx)
+	pages, err := listPageTargets(ctx.port)
 	if err != nil {
 		return err
 	}
 
-	pages, err := browser.Pages()
-	if err != nil {
-		return fmt.Errorf("failed to list pages: %w", err)
+	if len(pages) == 0 {
+		fmt.Println("(no pages open)")
+		return nil
 	}
 
-	for i, p := range pages {
-		info, err := p.Info()
-		if err != nil {
-			fmt.Printf("[%d] (error: %v)\n", i, err)
-			continue
-		}
-		fmt.Printf("[%d] %s — %s\n", i, info.Title, info.URL)
+	current, err := findPageTarget(ctx.port)
+	if err != nil {
+		return err
 	}
+
+	for i, t := range pages {
+		mark := " "
+		if t.ID == current {
+			mark = "*"
+		}
+		fmt.Printf("%s [%d] %s\n", mark, i, t.URL)
+	}
+
+	fmt.Println("\n* is the tab every command acts on. `peek page <index>` moves it.")
 	return nil
 }
 
@@ -40,29 +46,37 @@ func cmdPage(ctx *cmdContext, args []string) error {
 		return fmt.Errorf("invalid index: %s", args[0])
 	}
 
-	browser, err := connectBrowser(ctx)
+	pages, err := listPageTargets(ctx.port)
 	if err != nil {
 		return err
-	}
-
-	pages, err := browser.Pages()
-	if err != nil {
-		return fmt.Errorf("failed to list pages: %w", err)
 	}
 
 	if idx < 0 || idx >= len(pages) {
 		return fmt.Errorf("index %d out of range (0-%d)", idx, len(pages)-1)
 	}
 
-	page := pages[idx]
+	target := pages[idx]
+
+	browser, err := connectBrowser(ctx)
+	if err != nil {
+		return err
+	}
+
+	page, err := browser.PageFromTarget(proto.TargetTargetID(target.ID))
+	if err != nil {
+		return fmt.Errorf("failed to connect to page: %w", err)
+	}
+
 	if _, err := page.Activate(); err != nil {
 		return fmt.Errorf("failed to activate page: %w", err)
 	}
 
-	info, _ := page.Info()
-	if info != nil {
-		fmt.Printf("switched to [%d] %s\n", idx, info.Title)
+	// The choice has to outlive this process or the next command guesses again.
+	if err := rememberTab(ctx.port, target.ID); err != nil {
+		return fmt.Errorf("cannot remember the selected tab: %w", err)
 	}
+
+	fmt.Printf("switched to [%d] %s\n", idx, target.URL)
 	return nil
 }
 
@@ -84,6 +98,11 @@ func cmdNewPage(ctx *cmdContext, args []string) error {
 
 	if url != "about:blank" {
 		page.Timeout(10 * time.Second).WaitLoad()
+	}
+
+	// A new tab is the one you meant to work in, so it becomes the current one.
+	if err := rememberTab(ctx.port, string(page.TargetID)); err != nil {
+		return fmt.Errorf("cannot remember the new tab: %w", err)
 	}
 
 	info, _ := page.Info()
@@ -108,6 +127,8 @@ func cmdClosePage(ctx *cmdContext) error {
 	if err := page.Close(); err != nil {
 		return fmt.Errorf("failed to close page: %w", err)
 	}
+
+	forgetTab(ctx.port)
 
 	fmt.Printf("closed %q\n", title)
 	return nil

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 )
 
@@ -26,10 +27,41 @@ func cmdNavigate(ctx *cmdContext, args []string) error {
 		return fmt.Errorf("wait load failed: %w", err)
 	}
 
-	info, _ := page.Info()
-	if info != nil {
-		fmt.Println(info.URL)
+	return reportLanding(page)
+}
+
+// reportLanding prints where the browser ended up and, when the server said something
+// other than OK, says so.
+//
+// A 404 or a 500 navigates perfectly: the document loads, the URL prints and the command
+// exits 0. Every screenshot after that is of a stack trace, and the caller has been told
+// nothing. The status is on the navigation timing entry, so there is nothing to intercept.
+func reportLanding(page *rod.Page) error {
+	res, err := page.Eval(`() => {
+		const nav = performance.getEntriesByType("navigation")[0]
+		return {
+			url: location.href,
+			status: nav && nav.responseStatus !== undefined ? nav.responseStatus : 0,
+		}
+	}`)
+	if err != nil {
+		return fmt.Errorf("cannot read the landing page: %w", err)
 	}
+
+	landing, ok := res.Value.Val().(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("cannot read the landing page")
+	}
+
+	url := fmt.Sprint(landing["url"])
+	status := int(asFloat(landing["status"]))
+
+	if status >= 400 {
+		return fmt.Errorf("%s answered %d — the page that loaded is the server's error page",
+			url, status)
+	}
+
+	fmt.Println(url)
 	return nil
 }
 
@@ -47,8 +79,7 @@ func cmdReload(ctx *cmdContext) error {
 		return fmt.Errorf("wait load failed: %w", err)
 	}
 
-	fmt.Println("reloaded")
-	return nil
+	return reportLanding(page)
 }
 
 func cmdBack(ctx *cmdContext) error {
