@@ -340,13 +340,23 @@ func cmdFill(ctx *cmdContext, args []string) error {
 
 	value := strings.Join(rest, " ")
 
-	if err := el.SelectAllText(); err != nil {
-		return fmt.Errorf("cannot select the text of %s: %w", desc, err)
+	// Focus and clear in JS. rod's own SelectAllText and Input go through Focus, which
+	// scrolls the element into view — the same scroll path cmdClick refuses to take
+	// because it hangs on complex layouts, and it hung here too once a session had been
+	// running a while. Focusing directly costs nothing and cannot hang.
+	if _, err := el.Eval(`() => {
+		this.focus()
+		if (this.value !== undefined && this.value !== null) {
+			this.value = ""
+			this.dispatchEvent(new Event("input", { bubbles: true }))
+		}
+	}`); err != nil {
+		return fmt.Errorf("cannot focus %s: %w", desc, err)
 	}
-	if err := page.Keyboard.Press(input.Backspace); err != nil {
-		return fmt.Errorf("cannot clear %s: %w", desc, err)
-	}
-	if err := el.Input(value); err != nil {
+
+	// The text goes in as real insertion rather than an assignment, so a field that
+	// reacts to typing — a search-as-you-type, an autocomplete — reacts.
+	if err := page.InsertText(value); err != nil {
 		return fmt.Errorf("fill failed: %w", err)
 	}
 
