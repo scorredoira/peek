@@ -10,19 +10,22 @@ needed — `peek` drives the Chrome you already have.
 **macOS (Apple Silicon)**
 
 ```bash
-curl -fsSL https://prisnap.com/dl/peek-darwin-arm64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-darwin-arm64 -o peek && chmod +x peek
+sudo mv peek /usr/local/bin/
 ```
 
 **macOS (Intel)**
 
 ```bash
-curl -fsSL https://prisnap.com/dl/peek-darwin-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-darwin-amd64 -o peek && chmod +x peek
+sudo mv peek /usr/local/bin/
 ```
 
 **Linux**
 
 ```bash
-curl -fsSL https://prisnap.com/dl/peek-linux-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-linux-amd64 -o peek && chmod +x peek
+sudo mv peek /usr/local/bin/
 ```
 
 **Windows (PowerShell)**
@@ -30,6 +33,11 @@ curl -fsSL https://prisnap.com/dl/peek-linux-amd64 -o /usr/local/bin/peek && chm
 ```powershell
 curl.exe -fsSL https://prisnap.com/dl/peek-windows-amd64.exe -o peek.exe
 ```
+
+The download and the move are two steps on purpose: `/usr/local/bin` belongs to root,
+so writing there directly fails with `curl: (56) Failure writing output to destination`
+— which reads like a network problem and is not one. No `sudo`? Skip the move and put
+`peek` anywhere on your PATH you can write to.
 
 A binary fetched with `curl` carries no quarantine attribute, so macOS Gatekeeper
 never runs and there is nothing to sign or notarize.
