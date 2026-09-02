@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-compile the release binaries into dist/. Upload them to prisnap.com/peek/.
+# Cross-compile the release binaries into dist/. Upload them to prisnap.com/dl/ (scl push superadmin).
 set -e
 
 cd "$(dirname "$0")"

@@ -10,25 +10,25 @@ needed — `peek` drives the Chrome you already have.
 **macOS (Apple Silicon)**
 
 ```bash
-curl -fsSL https://prisnap.com/peek/peek-darwin-arm64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-darwin-arm64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
 ```
 
 **macOS (Intel)**
 
 ```bash
-curl -fsSL https://prisnap.com/peek/peek-darwin-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-darwin-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
 ```
 
 **Linux**
 
 ```bash
-curl -fsSL https://prisnap.com/peek/peek-linux-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
+curl -fsSL https://prisnap.com/dl/peek-linux-amd64 -o /usr/local/bin/peek && chmod +x /usr/local/bin/peek
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-curl.exe -fsSL https://prisnap.com/peek/peek-windows-amd64.exe -o peek.exe
+curl.exe -fsSL https://prisnap.com/dl/peek-windows-amd64.exe -o peek.exe
 ```
 
 A binary fetched with `curl` carries no quarantine attribute, so macOS Gatekeeper
