@@ -442,68 +442,136 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 		}
 	}
 
-	tag, _ := el.Eval(`() => this.tagName`)
-	if tag != nil && strings.EqualFold(tag.Value.Str(), "select") {
-		err = el.Select([]string{value}, true, rod.SelectorTypeText)
-		if err != nil {
-			return fmt.Errorf("select failed: %w", err)
+	desc := fmt.Sprintf("%q", label)
+	if err := refuseUnclickable(el, desc); err != nil {
+		return err
+	}
+
+	tag, err := el.Eval(`() => this.tagName`)
+	if err != nil {
+		return fmt.Errorf("cannot read the field: %w", err)
+	}
+
+	if strings.EqualFold(tag.Value.Str(), "select") {
+		if err := selectNativeOption(el, value); err != nil {
+			return err
 		}
 	} else {
-		// For custom dropdowns: click to open, then click the option.
-		// Use JS click to avoid Rod's ScrollIntoView which triggers
-		// scroll events that close framework popups.
-		if _, err := el.Eval(`() => this.click()`); err != nil {
-			return fmt.Errorf("click to open failed: %w", err)
+		if err := selectFromPopup(page, el, value); err != nil {
+			return err
 		}
-		time.Sleep(300 * time.Millisecond)
-
-		// Look for the option inside the visible popup using a single
-		// JS call that finds and clicks in one shot. This avoids the
-		// 3s retry loop of findByCSS which outlasts the popup lifetime.
-		jsCode := fmt.Sprintf(`(function(){
-			var sels = [".Popup .row", ".Popup .option", ".Popup li"];
-			var lower = %q.toLowerCase();
-			var all = [];
-			for (var s = 0; s < sels.length; s++) {
-				var els = document.querySelectorAll(sels[s]);
-				for (var i = 0; i < els.length; i++) {
-					var t = els[i].textContent.trim();
-					if (t) all.push(t);
-					if (t.toLowerCase() === lower || t.toLowerCase().indexOf(lower) !== -1) {
-						els[i].click();
-						return JSON.stringify({found: true});
-					}
-				}
-			}
-			return JSON.stringify({found: false, options: all.slice(0, 10)});
-		})()`, value)
-
-		// Retry a few times since the popup may need a moment to render.
-		var lastResult string
-		for attempt := 0; attempt < 6; attempt++ {
-			if attempt > 0 {
-				time.Sleep(300 * time.Millisecond)
-			}
-			res, jsErr := proto.RuntimeEvaluate{Expression: jsCode}.Call(page)
-			if jsErr != nil {
-				continue
-			}
-			lastResult = res.Result.Value.Str()
-			if strings.Contains(lastResult, `"found":true`) {
-				goto selected
-			}
-		}
-
-		// Option not found. Close the popup and report available options.
-		page.KeyActions().Press(input.Escape).Do()
-		time.Sleep(100 * time.Millisecond)
-		return fmt.Errorf("option %q not found\n  available: %s", value, lastResult)
-
-	selected:
 	}
 
 	fmt.Printf("selected %q = %q\n", label, value)
 	return nil
+}
+
+// selectNativeOption picks an option of a real <select> by its visible text.
+//
+// rod's own Select goes through Focus, which scrolls the element into view — the path
+// that hangs on complex layouts, the same one fill had to stop taking. Matching and
+// setting in JS costs nothing and cannot hang, and it can say which options there ARE
+// when none matches, instead of a bare "not found".
+func selectNativeOption(el *rod.Element, value string) error {
+	js := fmt.Sprintf(`() => {
+		const wanted = %q.toLowerCase()
+		const options = Array.from(this.options)
+		const label = o => (o.label || o.textContent || "").trim()
+
+		let hit = options.find(o => label(o).toLowerCase() === wanted)
+		if (!hit) { hit = options.find(o => label(o).toLowerCase().indexOf(wanted) >= 0) }
+		if (!hit) { return { found: false, options: options.map(label).slice(0, 10) } }
+
+		this.value = hit.value
+		this.dispatchEvent(new Event("input", { bubbles: true }))
+		this.dispatchEvent(new Event("change", { bubbles: true }))
+		return { found: true, chosen: label(hit) }
+	}`, value)
+
+	res, err := el.Eval(js)
+	if err != nil {
+		return fmt.Errorf("select failed: %w", err)
+	}
+
+	outcome, ok := res.Value.Val().(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("select failed: cannot read the result")
+	}
+
+	if found, _ := outcome["found"].(bool); !found {
+		return fmt.Errorf("option %q not found\n  available: %v", value, outcome["options"])
+	}
+
+	return nil
+}
+
+// selectFromPopup drives a custom dropdown: press the control, then press the option.
+//
+// Both presses dispatch the full pointer sequence, because a dropdown that opens on
+// mousedown — most of them — saw nothing at all from the bare element.click() this used
+// to do, and the command reported success anyway.
+func selectFromPopup(page *rod.Page, el *rod.Element, value string) error {
+	if err := pressElement(el, "click"); err != nil {
+		return fmt.Errorf("cannot open the dropdown: %w", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	// One JS call finds and presses in one shot: findByCSS's 3s retry outlasts the
+	// popup, which closes the moment anything else touches the page.
+	js := fmt.Sprintf(`(function(){
+		var sels = [".Popup .row", ".Popup .option", ".Popup li"];
+		var lower = %q.toLowerCase();
+		var all = [];
+		for (var s = 0; s < sels.length; s++) {
+			var els = document.querySelectorAll(sels[s]);
+			for (var i = 0; i < els.length; i++) {
+				var t = els[i].textContent.trim();
+				if (t) all.push(t);
+				if (t.toLowerCase() === lower || t.toLowerCase().indexOf(lower) !== -1) {
+					var el = els[i];
+					var r = el.getBoundingClientRect();
+					var opts = {
+						bubbles: true, cancelable: true, view: window,
+						clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+						button: 0, buttons: 1,
+					};
+					el.dispatchEvent(new PointerEvent("pointerdown", opts));
+					el.dispatchEvent(new MouseEvent("mousedown", opts));
+					el.dispatchEvent(new PointerEvent("pointerup", opts));
+					el.dispatchEvent(new MouseEvent("mouseup", opts));
+					el.click();
+					return JSON.stringify({found: true});
+				}
+			}
+		}
+		return JSON.stringify({found: false, options: all.slice(0, 10)});
+	})()`, value)
+
+	var lastResult string
+
+	// The popup may need a moment to render.
+	for attempt := 0; attempt < 6; attempt++ {
+		if attempt > 0 {
+			time.Sleep(300 * time.Millisecond)
+		}
+
+		res, err := proto.RuntimeEvaluate{Expression: js}.Call(page)
+		if err != nil {
+			continue
+		}
+
+		lastResult = res.Result.Value.Str()
+		if strings.Contains(lastResult, `"found":true`) {
+			return nil
+		}
+	}
+
+	// Close the popup so the page is left as it was found.
+	page.KeyActions().Press(input.Escape).Do()
+	time.Sleep(100 * time.Millisecond)
+
+	return fmt.Errorf("option %q not found\n  available: %s", value, lastResult)
 }
 
 func cmdType(ctx *cmdContext, args []string) error {

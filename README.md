@@ -328,6 +328,19 @@ peek --port $PORT select "Booking type" "Green Fee 18"
 
 If the dropdown trigger doesn't have a standard input role (textbox, combobox), `select` falls back to finding it by visible text.
 
+**It refuses a select nobody could use**, the same gate as `click`, and it names the
+options that exist when the one you asked for does not:
+
+```
+peek: option "Portugal" not found
+  available: [Spain France Italy]
+```
+
+A custom dropdown is opened with the full pointer sequence, so one that opens on
+`mousedown` actually opens — a bare `click()` left it shut while the command reported
+success. A real `<select>` is matched and set in JS rather than through rod's Select,
+which goes through the scroll-into-view path that hangs on complex layouts.
+
 #### type
 
 Type raw text into the currently focused element.
