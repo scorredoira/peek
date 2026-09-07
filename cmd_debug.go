@@ -197,6 +197,10 @@ func formatBytes(v interface{}) string {
 // exercised, and the page then sat frozen on a native confirm() while the next command timed
 // out with an unrelated error. The answer lives in the page instead (see capture.go), so it
 // survives the command that set it, which is the only way a CLI can do this at all.
+//
+// The same choice is handed to the native backstop (dialogs.go) for the dialogs the page's
+// overrides never see. That one only lasts this process, which is a .bro file — a standalone
+// `peek dialog accept` still sets the tab's answer, and the tab is where it matters.
 func cmdDialog(ctx *cmdContext, args []string) error {
 	_, page, err := connect(ctx)
 	if err != nil {
@@ -218,12 +222,14 @@ func cmdDialog(ctx *cmdContext, args []string) error {
 		if err := setDialogPolicy(page, true, text); err != nil {
 			return err
 		}
+		ctx.dialogPolicy().set(true, text)
 		fmt.Println("dialogs will be accepted from now on, in this tab")
 
 	case "dismiss":
 		if err := setDialogPolicy(page, false, ""); err != nil {
 			return err
 		}
+		ctx.dialogPolicy().set(false, "")
 		fmt.Println("dialogs will be dismissed from now on, in this tab")
 
 	default:

@@ -547,18 +547,42 @@ list points you elsewhere.
 
 ### Dialogs
 
+**A dialog never blocks the page, and you do not have to do anything.** `alert`, `confirm` and
+`prompt` are answered inside the page, which is also what lets `peek dialog` tell you what was
+asked. The default answer is **no**: pressing OK on "Delete everything?" while nobody is looking
+is not a tool's call.
+
+What the page's own overrides cannot reach is answered by Chrome instead, and said on stderr:
+
+| Dialog | Answer | Why |
+|--------|--------|-----|
+| `beforeunload` — "Leave site? Changes you made may not be saved" | **accepted** | It is not a function the page calls, so there is nothing to override: only Chrome can answer it. And it is not a question about the app — the command it interrupted is the one that asked to leave, and the unsaved edits are the ones this run typed. |
+| `alert` | **accepted** | One button. Accept and dismiss both close it. |
+| a `confirm` the overrides never reached — an iframe, or a script that asked first | **dismissed** | The same answer the page's own override gives, so which door it came through does not change what the app was told. |
+
+```
+dialog: beforeunload "" → accepted
+```
+
+Filling a form and then navigating away was enough to freeze the browser on that one, with every
+command after it timing out and nothing but a human at the keyboard to get it moving again.
+
 #### dialog accept
 
-Accept the next JavaScript dialog.
+Answer yes from now on — to the confirms and prompts, and to the `prompt` text.
 
 ```bash
 peek --port $PORT dialog accept
 peek --port $PORT dialog accept "prompt text"
 ```
 
+The answer is remembered in the tab, so it survives the command that set it. The native backstop
+in the table above keeps its own copy, and that one only lasts the process — which shows up only
+for a `confirm` that reached Chrome instead of the page.
+
 #### dialog dismiss
 
-Dismiss dialogs.
+Back to answering no.
 
 ```bash
 peek --port $PORT dialog dismiss
@@ -576,6 +600,9 @@ peek --port $PORT dialog
 confirm: Delete this invoice? → dismissed
 prompt: New name? → Santiago
 ```
+
+A `beforeunload` is not in that list: while it is up the renderer is blocked, so there is no
+JavaScript left to record it with. Its line on stderr is the record.
 
 **Dialogs are answered by default, and the default answer is no.** A native
 `alert`/`confirm`/`prompt` blocks the renderer and a CLI has nobody there to press a button:

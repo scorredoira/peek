@@ -231,7 +231,7 @@ Debug:
   console               Show console messages
   network               Show network requests
 
-Dialogs:
+Dialogs (never block: answered, and a confirm gets a no):
   dialog                Show what the page asked (alert / confirm / prompt)
   dialog accept [text]  Answer yes from now on (optional input for prompts)
   dialog dismiss        Answer no from now on (the default)

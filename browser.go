@@ -18,6 +18,11 @@ type cmdContext struct {
 	headless bool
 	workers  int
 	pid      int // Chrome process ID (used by tests for cleanup)
+
+	// The backstop answer for native dialogs. Lives here rather than in a global because
+	// `peek test -w N` runs its files as goroutines in one process, each with its own
+	// context and its own port.
+	dialogs *dialogPolicy
 }
 
 // chromeTarget represents a target from Chrome's /json/list endpoint.
@@ -49,6 +54,11 @@ func connect(ctx *cmdContext) (*rod.Browser, *rod.Page, error) {
 	// the problem: a click that submits a form lands on a document nobody instrumented, and the
 	// throw it does on the way in is the message you most wanted. See capture.go.
 	installCapture(page)
+
+	// Same reason, one step further: what the page's overrides cannot reach — a beforeunload
+	// above all — stops the page dead, and nothing this process does afterwards can reach it.
+	// See dialogs.go.
+	armDialogs(page, ctx.dialogPolicy())
 
 	return browser, page, nil
 }
