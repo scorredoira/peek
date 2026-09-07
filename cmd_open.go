@@ -40,7 +40,7 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 	forgetTab(port)
 
 	// Each port gets its own profile dir for full isolation.
-	dataDir := filepath.Join(os.TempDir(), fmt.Sprintf("peek-chrome-%d", port))
+	dataDir := profileDir(port)
 
 	// Disable password manager via Chrome preferences.
 	defaultDir := filepath.Join(dataDir, "Default")
@@ -95,10 +95,10 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if isPortOpen(port) {
-			// Start background monitor to kill Chrome when all windows are closed.
-			if !ctx.headless {
-				startMonitor(port, chromeCmd.Process.Pid)
-			}
+			// From here on this Chrome outlives the process that started it, so the
+			// reaper is armed before anything else can go wrong. See cmdMonitor.
+			touchUse(port)
+			startMonitor(port, chromeCmd.Process.Pid, ctx.headless)
 
 			// The port goes out FIRST, whatever happens next: Chrome is already running,
 			// and a caller who never learns its port has no way to close it.
@@ -203,27 +203,83 @@ func isPortOpen(port int) bool {
 	return true
 }
 
-// startMonitor spawns a background process that watches Chrome
-// and kills it when all windows are closed.
-func startMonitor(port, pid int) {
+// profileDir is the throwaway Chrome profile a port gets. Its name is also how a leaked
+// Chrome is told apart from the user's own on the process list — `scl kill` matches on it.
+func profileDir(port int) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("peek-chrome-%d", port))
+}
+
+// idleLimit is how long a headless Chrome may go undriven before the monitor kills it.
+//
+// Long enough that a session which pauses to build or to run a test suite comes back to the
+// page it left — losing it means losing the login too. Short enough that a session which
+// simply ended does not leave a browser running until the machine reboots.
+const idleLimit = 30 * time.Minute
+
+const lastUseFile = ".peek-lastuse"
+
+// touchUse records that a command drove this Chrome, which is all the monitor has to go on:
+// a CLI leaves nothing else behind between commands.
+//
+// Not fatal, deliberately: this is a hint for the reaper, and a command that did its work must
+// not report failure because the hint could not be written. The cost of it failing is a Chrome
+// that outstays its welcome, which is what `scl kill` is for.
+func touchUse(port int) {
+	path := filepath.Join(profileDir(port), lastUseFile)
+	_ = os.WriteFile(path, nil, 0644)
+}
+
+// idleFor says how long nothing has driven the Chrome on this port. A missing mark means no
+// answer rather than "forever": it is not evidence to kill on.
+func idleFor(port int) (time.Duration, bool) {
+	info, err := os.Stat(filepath.Join(profileDir(port), lastUseFile))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
+}
+
+// startMonitor spawns the background process that reaps this Chrome.
+//
+// It has to be a separate process, not a goroutine: peek is a CLI, and the command that
+// launched Chrome exits seconds later. This one is what survives it — including when the
+// parent is killed outright, which is how a test run that times out used to leave a browser
+// behind for good.
+func startMonitor(port, pid int, headless bool) {
 	exePath, err := os.Executable()
 	if err != nil {
 		return
 	}
-	m := exec.Command(exePath, "_monitor", strconv.Itoa(port), strconv.Itoa(pid))
+	m := exec.Command(exePath, "_monitor", strconv.Itoa(port), strconv.Itoa(pid), boolArg(headless))
 	m.Stdout = nil
 	m.Stderr = nil
 	m.Start()
 }
 
-// cmdMonitor runs in the background, polling Chrome's targets.
-// When no pages remain (user closed all windows), it kills Chrome.
+func boolArg(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// cmdMonitor runs in the background and kills Chrome once nobody wants it.
+//
+// Two ways nobody wants it, because the two kinds of Chrome die differently:
+//
+//   - No pages left. A person closed the last window, which is the whole signal for a
+//     headful browser.
+//   - Nobody has driven it for idleLimit. A HEADLESS Chrome has no window to close and
+//     nobody watching it, so that signal never comes: it used to sit there forever, one per
+//     peek run, until they were killed by hand. macOS counts every one of them as an app,
+//     which is how the Local Network list filled up with a wall of "Google Chrome".
 func cmdMonitor(args []string) {
-	if len(args) < 2 {
+	if len(args) < 3 {
 		return
 	}
 	port, _ := strconv.Atoi(args[0])
 	pid, _ := strconv.Atoi(args[1])
+	headless := args[2] == "1"
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
@@ -235,6 +291,13 @@ func cmdMonitor(args []string) {
 
 	for {
 		time.Sleep(2 * time.Second)
+
+		if headless {
+			if idle, known := idleFor(port); known && idle > idleLimit {
+				proc.Kill()
+				return
+			}
+		}
 
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/json/list", port))
 		if err != nil {
