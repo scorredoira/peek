@@ -1,12 +1,14 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+	"regexp"
+
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 const defaultTimeout = 10 * time.Second
@@ -14,7 +16,7 @@ const pollInterval = 300 * time.Millisecond
 
 func cmdWait(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: peek wait <text> | --css <sel> | --gone <text> | --url <pattern>")
+		return fmt.Errorf("usage: peek wait <text> | --css <sel> | --gone <text> | --url <part> | --url-re <regexp>")
 	}
 
 	timeout := defaultTimeout
@@ -46,7 +48,16 @@ func cmdWait(ctx *cmdContext, args []string) error {
 			if i+1 >= len(args) {
 				return fmt.Errorf("--url needs a pattern")
 			}
-			return waitURL(ctx, args[i+1], timeout)
+			return waitURL(ctx, args[i+1], nil, timeout)
+		case "--url-re":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--url-re needs a regular expression")
+			}
+			re, err := regexp.Compile(args[i+1])
+			if err != nil {
+				return fmt.Errorf("--url-re: %w", err)
+			}
+			return waitURL(ctx, args[i+1], re, timeout)
 		default:
 			rest = append(rest, args[i])
 		}
@@ -97,7 +108,7 @@ func isPresent(page *rod.Page, t waitTarget) (bool, error) {
 		return presentByCSS(page, t)
 	}
 
-	found, err := presentInAXTree(page, t.text)
+	found, err := browse.PresentInAXTree(page, t.text)
 	if err != nil {
 		return false, err
 	}
@@ -105,7 +116,7 @@ func isPresent(page *rod.Page, t waitTarget) (bool, error) {
 		return true, nil
 	}
 
-	return presentInText(page, t.text)
+	return browse.PresentInText(page, t.text)
 }
 
 func presentByCSS(page *rod.Page, t waitTarget) (bool, error) {
@@ -121,53 +132,6 @@ func presentByCSS(page *rod.Page, t waitTarget) (bool, error) {
 		}
 		return false
 	}`, t.css, t.text)
-
-	res, err := page.Eval(js)
-	if err != nil {
-		return false, err
-	}
-
-	return res.Value.Bool(), nil
-}
-
-func presentInAXTree(page *rod.Page, text string) (bool, error) {
-	tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
-	if err != nil {
-		return false, err
-	}
-
-	lower := strings.ToLower(text)
-
-	for _, node := range tree.Nodes {
-		if node.Ignored {
-			continue
-		}
-
-		name := axValueStr(node.Name)
-		if name != "" && strings.Contains(strings.ToLower(name), lower) {
-			return true, nil
-		}
-
-		value := axValueStr(node.Value)
-		if value != "" && strings.Contains(strings.ToLower(value), lower) {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func presentInText(page *rod.Page, text string) (bool, error) {
-	js := fmt.Sprintf(`() => {
-		const wanted = %q.toLowerCase()
-		const body = document.body
-		if (!body) { return false }
-		if ((body.innerText || "").toLowerCase().indexOf(wanted) >= 0) { return true }
-		for (const el of document.querySelectorAll("input, textarea")) {
-			if (String(el.value || "").toLowerCase().indexOf(wanted) >= 0) { return true }
-		}
-		return false
-	}`, text)
 
 	res, err := page.Eval(js)
 	if err != nil {
@@ -248,7 +212,9 @@ func waitGone(ctx *cmdContext, t waitTarget, timeout time.Duration) error {
 }
 
 // waitURL waits for the URL to contain a pattern.
-func waitURL(ctx *cmdContext, pattern string, timeout time.Duration) error {
+// waitURL waits for the address to hold pattern, or to match re when one is given: an address
+// with an id in it (/apps/6824176623/…) is only said as a regular expression.
+func waitURL(ctx *cmdContext, pattern string, re *regexp.Regexp, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
@@ -259,7 +225,7 @@ func waitURL(ctx *cmdContext, pattern string, timeout time.Duration) error {
 		}
 
 		info, err := page.Info()
-		if err == nil && strings.Contains(info.URL, pattern) {
+		if err == nil && (re == nil && strings.Contains(info.URL, pattern) || re != nil && re.MatchString(info.URL)) {
 			fmt.Println(info.URL)
 			return nil
 		}

@@ -48,7 +48,7 @@ func (p *dialogPolicy) set(accept bool, text string) {
 // An alert has one button. Accept and dismiss both close it.
 //
 // A confirm or a prompt is a real question, and the default answer is no — the same answer the
-// page's own override gives, so which of the two doors it came through does not change what the
+// page's own override gives, so which of the two entry points it came through does not change what the
 // app was told.
 func (p *dialogPolicy) answer(kind proto.PageDialogType) (bool, string) {
 	if kind == proto.PageDialogTypeBeforeunload || kind == proto.PageDialogTypeAlert {

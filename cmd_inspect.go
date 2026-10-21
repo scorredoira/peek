@@ -1,7 +1,10 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -34,9 +37,9 @@ func getAccessibilityTree(page *rod.Page, verbose bool) (string, error) {
 
 	var sb strings.Builder
 	for _, node := range result.Nodes {
-		role := axValueStr(node.Role)
-		name := axValueStr(node.Name)
-		value := axValueStr(node.Value)
+		role := browse.AXValueStr(node.Role)
+		name := browse.AXValueStr(node.Name)
+		value := browse.AXValueStr(node.Value)
 
 		if node.Ignored {
 			continue
@@ -69,13 +72,6 @@ func getAccessibilityTree(page *rod.Page, verbose bool) (string, error) {
 	}
 
 	return sb.String(), nil
-}
-
-func axValueStr(v *proto.AccessibilityAXValue) string {
-	if v == nil {
-		return ""
-	}
-	return v.Value.Str()
 }
 
 var usefulRoles = map[string]bool{
@@ -165,8 +161,10 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 		}
 	}
 
-	// A crop is looked at up close, and JPEG artifacts are what you see there.
-	if zoomed {
+	// A crop is looked at up close, and JPEG artifacts are what you see there. A path that
+	// ends in .png is a PNG too: writing JPEG bytes under that name made a file that no viewer
+	// opens ("invalid PNG signature").
+	if zoomed || strings.HasSuffix(strings.ToLower(path), ".png") {
 		format = proto.PageCaptureScreenshotFormatPng
 	}
 	if path == "" {
@@ -187,6 +185,30 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 	if fullPage && zoomed {
 		return fmt.Errorf("--full takes the whole page; --css, --clip and --scale zoom into part of it")
 	}
+	// The tab being photographed becomes the one in front, and THAT is what makes Chrome
+	// draw it. Left to itself, a capture is served from the compositor's last presented
+	// frame, and a tab that is not in front — a second instance, one window behind another,
+	// another tab of this one — has presented none: the picture is whatever was lying around
+	// when it last had the screen, or nothing at all, with no error to say so.
+	//
+	// It used to ask for the drawing with captureBeyondViewport, and that is the bug this
+	// replaces: Chrome grants it by MOVING THE DEVICE METRICS, the page gets a resize, and
+	// every popup in the client closes on resize (Popup.ts). The panel you opened the
+	// browser to photograph was gone before the shutter — bell, menu, select, all of them —
+	// and the file came out of a page that had already reacted, exit 0, no error. Bringing
+	// the tab to the front costs the page nothing and draws just the same.
+	if err := (proto.PageBringToFront{}).Call(page); err != nil {
+		return fmt.Errorf("cannot bring the page to the front: %w", err)
+	}
+	if err := ensureDrawn(ctx, page); err != nil {
+		return err
+	}
+
+	// EVERY capture names its region, the plain one included — and Chrome reads a region in
+	// DOCUMENT coordinates, not in what is on screen. So --clip, which is documented from
+	// the viewport, and an element's box, which is measured from it, are both carried over
+	// by the scroll: without that, a capture of a page scrolled down came back showing the
+	// top of the document — or white, the region not being drawn at all.
 	if css != "" {
 		req.Clip, err = elementClip(page, css, scale)
 		if err != nil {
@@ -194,18 +216,43 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 		}
 	}
 	if clip != "" {
-		req.Clip, err = parseClip(clip, scale)
+		req.Clip, err = parseClip(page, clip, scale)
 		if err != nil {
 			return err
 		}
 	}
-	if req.Clip == nil && scale != 1 {
+	if fullPage {
+		req.Clip, err = contentClip(page)
+		if err != nil {
+			return err
+		}
+	}
+	if req.Clip == nil {
 		req.Clip, err = viewportClip(page, scale)
 		if err != nil {
 			return err
 		}
 	}
-	data, err := page.Screenshot(fullPage, req)
+
+	// A region that reaches past what is on screen — the whole page, an element taller than
+	// the window — was never rasterized, and a front tab does not have it to give: it comes
+	// out white. Chrome draws it only by MOVING THE DEVICE METRICS, which the page feels as
+	// a resize, and every popup in the client closes on resize (Popup.ts). So it is asked
+	// for only when the region needs it, and said out loud when it is: a picture that cost
+	// the page its open panel must never pass for one that did not.
+	onScreen, err := viewportClip(page, 1)
+	if err != nil {
+		return err
+	}
+	if !within(req.Clip, onScreen) {
+		req.CaptureBeyondViewport = true
+		fmt.Fprintln(os.Stderr,
+			"peek: this capture reaches past what is on screen, and Chrome draws that only by "+
+				"resizing the page — so anything that closes on resize (a popup, a menu, a "+
+				"select) is not in the picture")
+	}
+
+	data, err := page.Screenshot(false, req)
 	if err != nil {
 		return fmt.Errorf("screenshot failed: %w", err)
 	}
@@ -222,15 +269,17 @@ func cmdScreenshot(ctx *cmdContext, args []string) error {
 // Chrome re-renders the region at the given scale, so small text comes out sharp
 // instead of upscaled from the viewport raster.
 func elementClip(page *rod.Page, css string, scale float64) (*proto.PageViewport, error) {
-	el, err := findByCSS(page, css, "")
+	el, err := browse.FindByCSS(page, css, "")
 	if err != nil {
 		return nil, err
 	}
 
+	// Measured and shifted in one go: scrollIntoView moves the page under the box, so the
+	// scroll it ends at is the only one the rectangle can be read against.
 	res, err := el.Eval(`() => {
 		this.scrollIntoView({ block: "center", inline: "center" });
 		const r = this.getBoundingClientRect();
-		return [r.x, r.y, r.width, r.height];
+		return [r.x + window.scrollX, r.y + window.scrollY, r.width, r.height];
 	}`)
 	if err != nil {
 		return nil, fmt.Errorf("cannot measure %s: %w", css, err)
@@ -250,8 +299,9 @@ func elementClip(page *rod.Page, css string, scale float64) (*proto.PageViewport
 	}, nil
 }
 
-// parseClip reads "x,y,w,h" in viewport CSS pixels.
-func parseClip(spec string, scale float64) (*proto.PageViewport, error) {
+// parseClip reads "x,y,w,h" in viewport CSS pixels — what the caller sees on screen — and
+// answers the same region in the document coordinates Chrome captures by.
+func parseClip(page *rod.Page, spec string, scale float64) (*proto.PageViewport, error) {
 	parts := strings.Split(spec, ",")
 	if len(parts) != 4 {
 		return nil, fmt.Errorf("--clip wants x,y,w,h, got %q", spec)
@@ -269,16 +319,54 @@ func parseClip(spec string, scale float64) (*proto.PageViewport, error) {
 		return nil, fmt.Errorf("--clip needs a positive width and height")
 	}
 
+	onScreen, err := viewportClip(page, 1)
+	if err != nil {
+		return nil, err
+	}
+
 	return &proto.PageViewport{
-		X:      nums[0],
-		Y:      nums[1],
+		X:      onScreen.X + nums[0],
+		Y:      onScreen.Y + nums[1],
 		Width:  nums[2],
 		Height: nums[3],
 		Scale:  scale,
 	}, nil
 }
 
-// viewportClip is the whole viewport as a region, so --scale alone works too.
+// within says whether a capture region is inside what the window has on screen — the only
+// regions Chrome has already drawn.
+func within(region, onScreen *proto.PageViewport) bool {
+	// A box measured in CSS pixels lands on halves; a pixel of slack is not "beyond".
+	const slack = 1
+
+	return region.X >= onScreen.X-slack &&
+		region.Y >= onScreen.Y-slack &&
+		region.X+region.Width <= onScreen.X+onScreen.Width+slack &&
+		region.Y+region.Height <= onScreen.Y+onScreen.Height+slack
+}
+
+// contentClip is the whole document as a region: what --full captures.
+func contentClip(page *rod.Page) (*proto.PageViewport, error) {
+	metrics, err := proto.PageGetLayoutMetrics{}.Call(page)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the page size: %w", err)
+	}
+	if metrics.CSSContentSize == nil {
+		return nil, fmt.Errorf("cannot read the page size")
+	}
+
+	return &proto.PageViewport{
+		X:      0,
+		Y:      0,
+		Width:  metrics.CSSContentSize.Width,
+		Height: metrics.CSSContentSize.Height,
+		Scale:  1,
+	}, nil
+}
+
+// viewportClip is what is on screen as a region, so --scale alone works too. Its X and Y
+// are the scroll: a region is read in document coordinates, and the window sits wherever
+// the page was left.
 func viewportClip(page *rod.Page, scale float64) (*proto.PageViewport, error) {
 	metrics, err := proto.PageGetLayoutMetrics{}.Call(page)
 	if err != nil {
@@ -289,8 +377,8 @@ func viewportClip(page *rod.Page, scale float64) (*proto.PageViewport, error) {
 	}
 
 	return &proto.PageViewport{
-		X:      0,
-		Y:      0,
+		X:      metrics.CSSVisualViewport.PageX,
+		Y:      metrics.CSSVisualViewport.PageY,
 		Width:  metrics.CSSVisualViewport.ClientWidth,
 		Height: metrics.CSSVisualViewport.ClientHeight,
 		Scale:  scale,
@@ -344,12 +432,12 @@ func cmdStyles(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	q, err := parseElementArgs(args)
+	q, err := browse.ParseElementArgs(args)
 	if err != nil {
 		return err
 	}
 
-	el, err := findElement(page, q)
+	el, err := browse.FindElement(page, q)
 	if err != nil {
 		return err
 	}
@@ -376,7 +464,9 @@ func cmdStyles(ctx *cmdContext, args []string) error {
 			color: s.color,
 			background: s.backgroundColor,
 			font: s.fontSize + " " + s.fontWeight + " " + s.fontFamily.split(",")[0],
-			align: s.textAlign,
+			textAlign: s.textAlign,
+			flex: s.display.indexOf("flex") < 0 ? "" :
+				s.flexDirection + ", items " + s.alignItems + ", content " + s.justifyContent,
 			overflow: s.overflow,
 			zIndex: s.zIndex,
 			position: s.position,
@@ -388,12 +478,12 @@ func cmdStyles(ctx *cmdContext, args []string) error {
 		}
 	}`)
 	if err != nil {
-		return fmt.Errorf("cannot inspect %s: %w", describeQuery(q), err)
+		return fmt.Errorf("cannot inspect %s: %w", browse.DescribeQuery(q), err)
 	}
 
 	style, ok := res.Value.Val().(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("cannot read the computed style of %s", describeQuery(q))
+		return fmt.Errorf("cannot read the computed style of %s", browse.DescribeQuery(q))
 	}
 
 	printStyles(style)
@@ -402,7 +492,7 @@ func cmdStyles(ctx *cmdContext, args []string) error {
 
 var styleOrder = []string{
 	"tag", "classes", "box", "text", "display", "visibility", "opacity",
-	"position", "zIndex", "overflow", "align", "font", "color", "background",
+	"position", "zIndex", "overflow", "flex", "textAlign", "font", "color", "background",
 }
 
 // styleWarning is a flag the page can raise about an element and what it means.
@@ -432,4 +522,53 @@ func printStyles(style map[string]interface{}) {
 			fmt.Println(warning.message)
 		}
 	}
+}
+
+// ensureDrawn makes sure the page is being drawn before a capture: a page Chrome holds hidden (its
+// window minimized, or covered by another one, on a Chrome started without
+// --disable-backgrounding-occluded-windows) presents no frame, and a capture then waits for one
+// for ever. A minimized window is put back; one still hidden after that is said, never waited on.
+func ensureDrawn(ctx *cmdContext, page *rod.Page) error {
+	hidden := func() (bool, error) {
+		state, err := page.Eval(`() => document.visibilityState`)
+		if err != nil {
+			return false, fmt.Errorf("cannot read whether the page is drawn: %w", err)
+		}
+		return state.Value.Str() == "hidden", nil
+	}
+	gone, err := hidden()
+	if err != nil || !gone {
+		return err
+	}
+
+	browser, err := connectBrowser(ctx)
+	if err != nil {
+		return err
+	}
+	targetID, err := findPageTarget(ctx.port)
+	if err != nil {
+		return err
+	}
+	window, err := proto.BrowserGetWindowForTarget{TargetID: proto.TargetTargetID(targetID)}.Call(browser)
+	if err != nil {
+		return fmt.Errorf("cannot find the page's window: %w", err)
+	}
+	err = proto.BrowserSetWindowBounds{
+		WindowID: window.WindowID,
+		Bounds:   &proto.BrowserBounds{WindowState: proto.BrowserWindowStateNormal},
+	}.Call(browser)
+	if err != nil {
+		return fmt.Errorf("cannot put the page's window back: %w", err)
+	}
+
+	gone, err = hidden()
+	if err != nil {
+		return err
+	}
+	if gone {
+		return fmt.Errorf("the page is hidden (its window is covered by another), so Chrome " +
+			"draws nothing to capture: uncover it, or open this Chrome again with peek, " +
+			"which starts it drawing even when covered")
+	}
+	return nil
 }

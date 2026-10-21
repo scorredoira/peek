@@ -1,5 +1,11 @@
 #!/bin/bash
-# Cross-compile the release binaries into dist/. Upload them to prisnap.com/dl/ (scl push superadmin).
+# Cross-compile the release binaries into dist/. They are ARTEFACTS: git carries none of them
+# and neither does a worktree. The site that serves them ships with the binary now
+# (modules/platformSite), so they are NOT part of it: they go into the platform tenant's
+# override tree for that module, which is the tenant's own and is not committed.
+#
+# To publish them, copy dist/ over the server's
+# tenants/platform/software/modules/platformSite/web/dl/
 set -e
 
 cd "$(dirname "$0")"

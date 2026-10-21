@@ -1,7 +1,11 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -20,181 +24,30 @@ func cmdClick(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	q, err := parseElementArgs(args)
+	q, err := browse.ParseElementArgs(args)
 	if err != nil {
 		return err
 	}
 
-	el, err := findElement(page, q)
+	el, err := browse.FindElement(page, q)
 	if err != nil {
 		return err
 	}
 
-	if err := refuseUnclickable(el, describeQuery(q)); err != nil {
+	if err := reveal(ctx, page, el); err != nil {
 		return err
 	}
 
-	if err := pressElement(el, "click"); err != nil {
+	if err := browse.RefuseUnclickable(el, browse.DescribeQuery(q)); err != nil {
 		return err
 	}
 
-	fmt.Printf("clicked %s\n", describeQuery(q))
+	if err := press(ctx, page, el, "click"); err != nil {
+		return err
+	}
+
+	fmt.Printf("clicked %s\n", browse.DescribeQuery(q))
 	return nil
-}
-
-// reach is what the page says about whether an element could be interacted with at all.
-//
-// Facts, not a verdict: hovering something disabled is legitimate, clicking it is not, so
-// each command reads the ones it cares about.
-type reach struct {
-	disabled bool
-	unseen   string // why it cannot be seen, or ""
-	covered  string // what is painted on top, or ""
-}
-
-// checkReach scrolls the element into view and then asks the page about it.
-//
-// A JS click reaches the element directly: through an open dialog's backdrop, through
-// pointer-events:none, through anything. That is what makes it immune to the scroll hang of
-// rod's real-mouse path, and it is also how this tool can report "clicked" for an interaction
-// no user could perform. Refusing is the whole point of a verification tool.
-//
-// It asks the browser rather than reasoning about z-index: elementFromPoint is the authority
-// on what a click at that point would hit. An element containing the hit (its own label) or
-// contained by it counts as itself.
-//
-// It SCROLLS first, deliberately. Declining to judge whatever sat outside the viewport was a
-// hole exactly where the answer matters — an element parked off screen is the one a person
-// cannot click. The scroll is a plain scrollIntoView, not rod's mouse path, so nothing hangs.
-func checkReach(el *rod.Element) (reach, error) {
-	res, err := el.Eval(`() => {
-		this.scrollIntoView({ block: "center", inline: "center" })
-
-		const style = getComputedStyle(this)
-		const r = this.getBoundingClientRect()
-
-		let unseen = ""
-		if (style.display === "none") { unseen = "not rendered (display:none)" }
-		else if (style.visibility === "hidden") { unseen = "invisible (visibility:hidden)" }
-		else if (Number(style.opacity) === 0) { unseen = "fully transparent (opacity:0)" }
-		else if (r.width <= 0 || r.height <= 0) { unseen = "zero-sized" }
-		else if (style.pointerEvents === "none") { unseen = "click-through (pointer-events:none)" }
-		else if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) {
-			unseen = "outside the viewport even after scrolling to it"
-		}
-
-		const disabled = !!this.disabled ||
-			this.getAttribute("aria-disabled") === "true" ||
-			!!this.closest("fieldset[disabled]")
-
-		let covered = ""
-		if (!unseen) {
-			const x = r.left + r.width / 2
-			const y = r.top + r.height / 2
-			const at = document.elementFromPoint(x, y)
-			if (at && at !== this && !this.contains(at) && !at.contains(this)) {
-				const text = (at.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40)
-				covered = text ? at.tagName.toLowerCase() + ' "' + text + '"' : at.tagName.toLowerCase()
-			}
-		}
-
-		return { disabled: disabled, unseen: unseen, covered: covered }
-	}`)
-	if err != nil {
-		return reach{}, fmt.Errorf("cannot check whether the element is reachable: %w", err)
-	}
-
-	facts, ok := res.Value.Val().(map[string]interface{})
-	if !ok {
-		return reach{}, fmt.Errorf("cannot read the element's state")
-	}
-
-	var r reach
-	if v, ok := facts["disabled"].(bool); ok {
-		r.disabled = v
-	}
-	r.unseen = fmt.Sprint(facts["unseen"])
-	r.covered = fmt.Sprint(facts["covered"])
-
-	return r, nil
-}
-
-// refuseUnclickable is the gate every pressing command goes through.
-func refuseUnclickable(el *rod.Element, desc string) error {
-	r, err := checkReach(el)
-	if err != nil {
-		return err
-	}
-
-	if r.disabled {
-		return fmt.Errorf("%s is disabled — a user cannot press it, and pressing it does nothing",
-			desc)
-	}
-	if r.unseen != "" {
-		return fmt.Errorf("%s is %s — nobody could press it", desc, r.unseen)
-	}
-	if r.covered != "" {
-		return fmt.Errorf("%s is behind %s — a user pressing there would hit that instead",
-			desc, r.covered)
-	}
-
-	return nil
-}
-
-// pressElement dispatches the events a real press produces, in order.
-//
-// `element.click()` alone fires ONE click event and no pointer or mouse events at all, so
-// every control that opens on mousedown — most custom dropdowns, menus, drag handles —
-// did nothing while peek printed success. The native call still goes last because it is
-// what carries the activation behaviour: a form submits, a label focuses its input, a
-// checkbox toggles.
-func pressElement(el *rod.Element, kind string) error {
-	button := "0"
-	activation := `this.click()`
-
-	switch kind {
-	case "rightclick":
-		button = "2"
-		activation = `this.dispatchEvent(new MouseEvent("contextmenu", opts))`
-	case "dblclick":
-		activation = `this.click()
-		this.dispatchEvent(new MouseEvent("click", opts))
-		this.dispatchEvent(new MouseEvent("dblclick", opts))`
-	}
-
-	js := fmt.Sprintf(`() => {
-		const r = this.getBoundingClientRect()
-		const opts = {
-			bubbles: true,
-			cancelable: true,
-			view: window,
-			clientX: r.left + r.width / 2,
-			clientY: r.top + r.height / 2,
-			button: %s,
-			buttons: %s,
-		}
-
-		this.dispatchEvent(new PointerEvent("pointerdown", opts))
-		this.dispatchEvent(new MouseEvent("mousedown", opts))
-		if (this.focus) { this.focus() }
-		this.dispatchEvent(new PointerEvent("pointerup", opts))
-		this.dispatchEvent(new MouseEvent("mouseup", opts))
-		%s
-	}`, button, buttonsFor(button), activation)
-
-	if _, err := el.Eval(js); err != nil {
-		return fmt.Errorf("%s failed: %w", kind, err)
-	}
-
-	return nil
-}
-
-// buttonsFor maps the pressed button to the bitmask MouseEvent.buttons wants for it.
-func buttonsFor(button string) string {
-	if button == "2" {
-		return "2"
-	}
-	return "1"
 }
 
 func cmdRightClick(ctx *cmdContext, args []string) error {
@@ -207,25 +60,29 @@ func cmdRightClick(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	q, err := parseElementArgs(args)
+	q, err := browse.ParseElementArgs(args)
 	if err != nil {
 		return err
 	}
 
-	el, err := findElement(page, q)
+	el, err := browse.FindElement(page, q)
 	if err != nil {
 		return err
 	}
 
-	if err := refuseUnclickable(el, describeQuery(q)); err != nil {
+	if err := reveal(ctx, page, el); err != nil {
 		return err
 	}
 
-	if err := pressElement(el, "rightclick"); err != nil {
+	if err := browse.RefuseUnclickable(el, browse.DescribeQuery(q)); err != nil {
 		return err
 	}
 
-	fmt.Printf("right-clicked %s\n", describeQuery(q))
+	if err := press(ctx, page, el, "rightclick"); err != nil {
+		return err
+	}
+
+	fmt.Printf("right-clicked %s\n", browse.DescribeQuery(q))
 	return nil
 }
 
@@ -239,25 +96,29 @@ func cmdDblClick(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	q, err := parseElementArgs(args)
+	q, err := browse.ParseElementArgs(args)
 	if err != nil {
 		return err
 	}
 
-	el, err := findElement(page, q)
+	el, err := browse.FindElement(page, q)
 	if err != nil {
 		return err
 	}
 
-	if err := refuseUnclickable(el, describeQuery(q)); err != nil {
+	if err := reveal(ctx, page, el); err != nil {
 		return err
 	}
 
-	if err := pressElement(el, "dblclick"); err != nil {
+	if err := browse.RefuseUnclickable(el, browse.DescribeQuery(q)); err != nil {
 		return err
 	}
 
-	fmt.Printf("double-clicked %s\n", describeQuery(q))
+	if err := press(ctx, page, el, "dblclick"); err != nil {
+		return err
+	}
+
+	fmt.Printf("double-clicked %s\n", browse.DescribeQuery(q))
 	return nil
 }
 
@@ -306,14 +167,14 @@ func cmdFill(ctx *cmdContext, args []string) error {
 			return fmt.Errorf("usage: peek fill --name <name> <value>")
 		}
 		selector := fmt.Sprintf(`input[name=%q], textarea[name=%q]`, nameAttr, nameAttr)
-		el, err = findByCSS(page, selector, "")
+		el, err = browse.FindByCSS(page, selector, "")
 		desc = fmt.Sprintf("name=%q", nameAttr)
 
 	case cssAttr != "":
 		if len(rest) == 0 {
 			return fmt.Errorf("usage: peek fill --css <selector> <value>")
 		}
-		el, err = findByCSS(page, cssAttr, "")
+		el, err = browse.FindByCSS(page, cssAttr, "")
 		desc = fmt.Sprintf("css=%q", cssAttr)
 
 	default:
@@ -322,7 +183,7 @@ func cmdFill(ctx *cmdContext, args []string) error {
 		}
 		label := rest[0]
 		rest = rest[1:]
-		el, err = findInput(page, label)
+		el, err = browse.FindInput(page, label)
 		desc = fmt.Sprintf("%q", label)
 	}
 
@@ -330,43 +191,16 @@ func cmdFill(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	refuse, err := refusesInput(el)
-	if err != nil {
-		return err
-	}
-	if refuse != "" {
-		return fmt.Errorf("%s is %s — typing into it does nothing", desc, refuse)
-	}
-
 	value := strings.Join(rest, " ")
 
-	// Focus and clear in JS. rod's own SelectAllText and Input go through Focus, which
-	// scrolls the element into view — the same scroll path cmdClick refuses to take
-	// because it hangs on complex layouts, and it hung here too once a session had been
-	// running a while. Focusing directly costs nothing and cannot hang.
-	if _, err := el.Eval(`() => {
-		this.focus()
-		if (this.value !== undefined && this.value !== null) {
-			this.value = ""
-			this.dispatchEvent(new Event("input", { bubbles: true }))
-		}
-	}`); err != nil {
-		return fmt.Errorf("cannot focus %s: %w", desc, err)
+	var landed string
+	if pacedFor(ctx) {
+		landed, err = humanFill(ctx, page, el, value)
+	} else {
+		landed, err = browse.FillElement(page, el, value)
 	}
-
-	// The text goes in as real insertion rather than an assignment, so a field that
-	// reacts to typing — a search-as-you-type, an autocomplete — reacts.
-	if err := page.InsertText(value); err != nil {
-		return fmt.Errorf("fill failed: %w", err)
-	}
-
-	landed, err := fieldValue(el)
 	if err != nil {
-		return err
-	}
-
-	if landed == "" && value != "" {
-		return fmt.Errorf("%s is still empty after typing %q — nothing landed", desc, value)
+		return fmt.Errorf("%s: %w", desc, err)
 	}
 
 	if landed != value {
@@ -376,44 +210,6 @@ func cmdFill(ctx *cmdContext, args []string) error {
 
 	fmt.Printf("filled %s = %q\n", desc, value)
 	return nil
-}
-
-// refusesInput reports why a field cannot take typing, or "" when it can.
-//
-// A disabled or readonly input swallows every keystroke and leaves no trace. Typing into
-// one and reporting "filled" is the same lie as clicking something covered: the command
-// ran, the value is not there, and the next step builds on a field that was never set.
-func refusesInput(el *rod.Element) (string, error) {
-	res, err := el.Eval(`() => {
-		if (this.disabled) { return "disabled" }
-		if (this.readOnly) { return "readonly" }
-		const style = getComputedStyle(this)
-		if (style.display === "none" || style.visibility === "hidden") { return "not visible" }
-		return ""
-	}`)
-	if err != nil {
-		return "", fmt.Errorf("cannot inspect the field: %w", err)
-	}
-
-	return res.Value.Str(), nil
-}
-
-// fieldValue reads back what a field actually holds after typing.
-//
-// The point is not to second-guess the widget: a money or date input that reformats
-// what was typed is working correctly, and the caller is told what it shows rather
-// than refused. What it catches is the field that stayed empty, or a controlled input
-// that reverted the value the moment it was set.
-func fieldValue(el *rod.Element) (string, error) {
-	res, err := el.Eval(`() => {
-		if (this.value !== undefined && this.value !== null) { return String(this.value) }
-		return this.textContent || ""
-	}`)
-	if err != nil {
-		return "", fmt.Errorf("cannot read the field back: %w", err)
-	}
-
-	return res.Value.Str(), nil
 }
 
 func cmdSelect(ctx *cmdContext, args []string) error {
@@ -431,19 +227,22 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 
 	// Try fast CSS lookup first (custom widgets like .Select, .Input),
 	// then fall back to accessibility tree (native selects/inputs).
-	el, err := findByCSS(page, ".Select", label)
+	el, err := browse.FindByCSS(page, ".Select", label)
 	if err != nil {
-		el, err = findSelectByLabel(page, label)
+		el, err = browse.FindSelectByLabel(page, label)
 		if err != nil {
-			el, err = findInput(page, label)
+			el, err = browse.FindInput(page, label)
 			if err != nil {
-				return fmt.Errorf("input with label %q not found", label)
+				el, err = browse.FindDropdownTrigger(page, label)
+				if err != nil {
+					return fmt.Errorf("input with label %q not found", label)
+				}
 			}
 		}
 	}
 
 	desc := fmt.Sprintf("%q", label)
-	if err := refuseUnclickable(el, desc); err != nil {
+	if err := browse.RefuseUnclickable(el, desc); err != nil {
 		return err
 	}
 
@@ -474,12 +273,16 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 // when none matches, instead of a bare "not found".
 func selectNativeOption(el *rod.Element, value string) error {
 	js := fmt.Sprintf(`() => {
-		const wanted = %q.toLowerCase()
+		// a page's no-break spaces ("EE.\u00a0UU.") and its accents' form read as typed
+		const plain = t => t.normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase()
+		const wanted = plain(%q)
 		const options = Array.from(this.options)
 		const label = o => (o.label || o.textContent || "").trim()
 
-		let hit = options.find(o => label(o).toLowerCase() === wanted)
-		if (!hit) { hit = options.find(o => label(o).toLowerCase().indexOf(wanted) >= 0) }
+		let hit = options.find(o => plain(label(o)) === wanted)
+		// the option's value (en-US) names it too
+		if (!hit) { hit = options.find(o => plain(o.value) === wanted) }
+		if (!hit) { hit = options.find(o => plain(label(o)).indexOf(wanted) >= 0) }
 		if (!hit) { return { found: false, options: options.map(label).slice(0, 10) } }
 
 		this.value = hit.value
@@ -511,22 +314,24 @@ func selectNativeOption(el *rod.Element, value string) error {
 // mousedown — most of them — saw nothing at all from the bare element.click() this used
 // to do, and the command reported success anyway.
 func selectFromPopup(page *rod.Page, el *rod.Element, value string) error {
-	if err := pressElement(el, "click"); err != nil {
+	if err := browse.PressElement(el, "click"); err != nil {
 		return fmt.Errorf("cannot open the dropdown: %w", err)
 	}
 
 	time.Sleep(300 * time.Millisecond)
 
-	// One JS call finds and presses in one shot: findByCSS's 3s retry outlasts the
+	// One JS call finds and presses in one shot: browse.FindByCSS's 3s retry outlasts the
 	// popup, which closes the moment anything else touches the page.
 	js := fmt.Sprintf(`(function(){
-		var sels = [".Popup .row", ".Popup .option", ".Popup li"];
+		// scl's own popup, then any list of options a design library draws (role=option)
+		var sels = [".Popup .row", ".Popup .option", ".Popup li", "[role=option]"];
 		var lower = %q.toLowerCase();
 		var all = [];
 		for (var s = 0; s < sels.length; s++) {
 			var els = document.querySelectorAll(sels[s]);
 			for (var i = 0; i < els.length; i++) {
-				var t = els[i].textContent.trim();
+				if (!els[i].getClientRects().length) continue;
+				var t = els[i].textContent.replace(/\s+/g, " ").trim();
 				if (t) all.push(t);
 				if (t.toLowerCase() === lower || t.toLowerCase().indexOf(lower) !== -1) {
 					var el = els[i];
@@ -540,12 +345,16 @@ func selectFromPopup(page *rod.Page, el *rod.Element, value string) error {
 					el.dispatchEvent(new MouseEvent("mousedown", opts));
 					el.dispatchEvent(new PointerEvent("pointerup", opts));
 					el.dispatchEvent(new MouseEvent("mouseup", opts));
-					el.click();
+					// Guarded like browse.PressElement's: an option row that is not an
+					// HTMLElement has no click(), and the throw would cost the
+					// press after its mouse events had already gone out.
+					if (el.click) { el.click(); }
+					else { el.dispatchEvent(new MouseEvent("click", opts)); }
 					return JSON.stringify({found: true});
 				}
 			}
 		}
-		return JSON.stringify({found: false, options: all.slice(0, 10)});
+		return JSON.stringify({found: false, options: all.slice(0, 60)});
 	})()`, value)
 
 	var lastResult string
@@ -574,9 +383,25 @@ func selectFromPopup(page *rod.Page, el *rod.Element, value string) error {
 	return fmt.Errorf("option %q not found\n  available: %s", value, lastResult)
 }
 
+// cmdType is peek type <text>, or peek type --stdin: the text read from standard input and
+// never printed, for a password. An argument shows in the process list and the output echoes
+// what was typed; stdin does neither. One final newline is dropped (echo, a file).
 func cmdType(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: peek type <text>")
+		return fmt.Errorf("usage: peek type <text> | peek type --stdin")
+	}
+	secret := len(args) == 1 && args[0] == "--stdin"
+
+	text := strings.Join(args, " ")
+	if secret {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read standard input: %w", err)
+		}
+		text = strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r")
+		if text == "" {
+			return fmt.Errorf("nothing to type: standard input is empty")
+		}
 	}
 
 	_, page, err := connect(ctx)
@@ -584,11 +409,18 @@ func cmdType(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	text := strings.Join(args, " ")
-	if err := page.InsertText(text); err != nil {
+	typeText := page.InsertText
+	if pacedFor(ctx) {
+		typeText = func(text string) error { return humanType(page, text) }
+	}
+	if err := typeText(text); err != nil {
 		return fmt.Errorf("type failed: %w", err)
 	}
 
+	if secret {
+		fmt.Printf("typed %d characters from standard input\n", len([]rune(text)))
+		return nil
+	}
 	fmt.Printf("typed %q\n", text)
 	return nil
 }
@@ -603,8 +435,12 @@ func cmdPress(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	key := resolveKey(args[0])
-	if err := page.KeyActions().Press(key).Do(); err != nil {
+	keys, err := resolveCombo(args[0])
+	if err != nil {
+		return err
+	}
+
+	if err := page.KeyActions().Press(keys...).Do(); err != nil {
 		return fmt.Errorf("press failed: %w", err)
 	}
 
@@ -622,35 +458,43 @@ func cmdHover(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	q, err := parseElementArgs(args)
+	q, err := browse.ParseElementArgs(args)
 	if err != nil {
 		return err
 	}
 
-	el, err := findElement(page, q)
+	el, err := browse.FindElement(page, q)
 	if err != nil {
+		return err
+	}
+
+	if err := reveal(ctx, page, el); err != nil {
 		return err
 	}
 
 	// A disabled control is legitimately hovered — that is how its tooltip is read — so
 	// only being unseeable or covered is a refusal here.
-	r, err := checkReach(el)
+	r, err := browse.CheckReach(el)
 	if err != nil {
 		return err
 	}
-	if r.unseen != "" {
-		return fmt.Errorf("%s is %s — nobody could hover it", describeQuery(q), r.unseen)
+	if r.Unseen != "" {
+		return fmt.Errorf("%s is %s — nobody could hover it", browse.DescribeQuery(q), r.Unseen)
 	}
-	if r.covered != "" {
+	if r.Covered != "" {
 		return fmt.Errorf("%s is behind %s — the pointer would be over that instead",
-			describeQuery(q), r.covered)
+			browse.DescribeQuery(q), r.Covered)
 	}
 
-	if err := hoverElement(el); err != nil {
+	hover := hoverElement
+	if pacedFor(ctx) {
+		hover = func(el *rod.Element) error { return humanHover(ctx, page, el) }
+	}
+	if err := hover(el); err != nil {
 		return err
 	}
 
-	fmt.Printf("hovering %s\n", describeQuery(q))
+	fmt.Printf("hovering %s\n", browse.DescribeQuery(q))
 	return nil
 }
 
@@ -664,12 +508,12 @@ func cmdDrag(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	from, err := findByText(page, args[0])
+	from, err := browse.FindByText(page, args[0])
 	if err != nil {
 		return fmt.Errorf("from element: %w", err)
 	}
 
-	to, err := findByText(page, args[1])
+	to, err := browse.FindByText(page, args[1])
 	if err != nil {
 		return fmt.Errorf("to element: %w", err)
 	}
@@ -725,6 +569,57 @@ func cmdUpload(ctx *cmdContext, args []string) error {
 
 	fmt.Printf("uploaded %s\n", args[1])
 	return nil
+}
+
+// resolveCombo reads a key or a chord — "Enter", "Control+k", "Shift+Meta+Enter" — as the keys
+// to hold down, modifiers first. Without it a chord was read as its first letter, so
+// "Control+k" pressed a plain C and fired whatever that key means on the page.
+func resolveCombo(combo string) ([]input.Key, error) {
+	// The plus key is spelled "+" alone, or "++" after its modifiers ("Shift++"): splitting on
+	// "+" would read it as an empty key.
+	body := ""
+	last := "+"
+	switch {
+	case combo == "+":
+		body = ""
+	case strings.HasSuffix(combo, "++"):
+		body = strings.TrimSuffix(combo, "++")
+	default:
+		cut := strings.LastIndex(combo, "+")
+		body = ""
+		if cut >= 0 {
+			body = combo[:cut]
+		}
+		last = combo[cut+1:]
+	}
+
+	keys := []input.Key{}
+	if body != "" {
+		for _, part := range strings.Split(body, "+") {
+			switch strings.ToLower(part) {
+			case "control", "ctrl":
+				keys = append(keys, input.ControlLeft)
+			case "shift":
+				keys = append(keys, input.ShiftLeft)
+			case "alt", "option":
+				keys = append(keys, input.AltLeft)
+			case "meta", "cmd", "command":
+				keys = append(keys, input.MetaLeft)
+			default:
+				return nil, fmt.Errorf("unknown modifier %q in %q (Control, Shift, Alt, Meta)",
+					part, combo)
+			}
+		}
+	}
+
+	if last == "" {
+		return nil, fmt.Errorf("no key in %q", combo)
+	}
+
+	key := resolveKey(last)
+	keys = append(keys, key)
+
+	return keys, nil
 }
 
 func resolveKey(name string) input.Key {

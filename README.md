@@ -45,8 +45,20 @@ never runs and there is nothing to sign or notarize.
 From source (needs Go):
 
 ```bash
-go install github.com/scorredoira/peek@latest
+go build -o ~/go/bin/peek .
 ```
+
+The repo is private, so Go needs to know to fetch it with git rather than through the public
+proxy, once per machine:
+
+```bash
+go env -w GOPRIVATE=github.com/scorredoira/*
+git config --global url."git@github.com:scorredoira/".insteadOf "https://github.com/scorredoira/"
+```
+
+`browse/` is the Chrome driving shared with scl: `scl check`, `scl kill` and the engine's
+browser tests import it from here. A change to it reaches scl when scl takes the new version:
+`go get github.com/scorredoira/peek@<commit>` in scl, then `go mod tidy`.
 
 ## Quick Start
 
@@ -106,6 +118,43 @@ peek close                    # close Chrome on default port 9222
 peek --port 9223 close        # close Chrome on port 9223
 ```
 
+#### vault (macOS)
+
+A Chrome profile that keeps its logins, for the sites with no API (App Store Connect, Play
+Console, Google Cloud…). It lives in an AES-256 encrypted disk image in
+`~/.config/peek/vaults/<name>.sparsebundle`. While locked nothing can drive it.
+
+```bash
+peek vault new main          # asks for the password twice (unlock also creates it)
+peek unlock                  # main: asks for it, opens a visible Chrome, prints its port
+peek unlock apple <url>      # another vault, opened on a page
+peek restart                 # main's Chrome closed and started again, still unlocked
+peek lock                    # closes main's Chrome and locks it
+peek status                  # each vault, locked or unlocked, and its port
+```
+
+The password is read from the terminal, never from an argument or stdin, so a process with no
+terminal (an agent's shell) cannot unlock. Closing the vault's last window locks it too. The
+person signs in to each site by hand once; the logins stay in the vault.
+
+- **Orange**: every Chrome peek opens with a window, the vault's too, has an orange frame and
+  bar, so it is told from the person's own at a glance. The page is not touched, nor any
+  screenshot.
+- **A person's pace, when asked**: `peek unlock [name] --paced` (until it is locked) or
+  `peek --paced <command>` makes every press and keystroke (click, fill, select, type, press,
+  hover, drag, upload, scroll) wait half a second or more first, never the same: for the sites
+  that would rather not be driven by a machine. Paced, everything goes through Chrome's own
+  input (trusted events), shaped on a recording of a real hand: the pointer travels from where
+  the last command left it, nearly straight, fast first and homing in slowly, for as long as
+  the distance and the target's size ask (Fitts); the press lands off-centre and is held a
+  tenth of a second; fill and type go key by key, held keys overlapping, Shift and the Spanish
+  dead accent pressed as keys, and now and then a neighbouring letter typed and taken back;
+  an element out of view and `peek scroll` come by trackpad flicks with an inertial tail.
+  Otherwise peek goes as fast as it can.
+- **A session that ended**: `navigate` to a page that lands on a sign-in page instead
+  (accounts.google.com, idmsa.apple.com, a site's /login) fails and says so: sign in by hand
+  in the window, then go on.
+
 ---
 
 ### Navigation
@@ -149,7 +198,8 @@ peek --port $PORT forward
 
 #### resize
 
-Resize the browser window.
+Resize the browser window and set the page viewport to the exact requested CSS dimensions,
+including phone widths below the desktop window minimum.
 
 ```bash
 peek --port $PORT resize 1280 720
@@ -200,6 +250,17 @@ Options:
 - `--scale N` — re-render the region at N times the size
 - `--png` — PNG instead of JPEG
 - `--quality N` — JPEG quality (default 80)
+
+A capture does not touch the page it photographs: the tab is brought to the
+front, which is what makes Chrome draw it, and nothing else changes — so a
+popup, a menu or an open select is still there when the shutter falls. The
+region is read from the viewport at whatever scroll the page is at (`--clip`,
+and the element's own box for `--css`).
+
+What reaches PAST the window is the exception — `--full`, or `--css` on an
+element taller than it. Chrome draws that only by resizing the page, so
+everything that closes on resize is gone from those pictures; peek says so on
+stderr each time it has to ask.
 
 `--css` and `--clip` are exclusive, and neither combines with `--full`. Chrome
 re-renders the region at the requested scale rather than upscaling the raster,
@@ -257,7 +318,7 @@ affirmative line peek prints implies there is nothing left to check.
 
 #### click
 
-Click an element by its visible text. Also supports `--css` and `--id` flags for DOM-based lookup.
+Click an element by its visible text. Also supports `--css` and `--id` flags for DOM-based lookup, and `--ref N` for the node a snapshot printed as `[N]` (`--id` is the DOM id attribute, not that number).
 
 ```bash
 peek --port $PORT click Login
@@ -269,6 +330,8 @@ peek --port $PORT click --css ".btn-primary"
 
 # Click by DOM id
 peek --port $PORT click --id submitBtn
+peek --port $PORT click --ref 2724   # the [2724] a snapshot printed
+peek --port $PORT click --role tab "Pages"   # the tab, not a link with the same text
 ```
 
 When using `--css` or `--id`, an optional text argument filters by text content (case-insensitive substring match).
@@ -276,13 +339,16 @@ When using `--css` or `--id`, an optional text argument filters by text content 
 **It refuses a press a person could not make.** Before anything is dispatched the element is
 scrolled into view and checked: disabled (including `aria-disabled` and a disabled
 `<fieldset>`), not rendered, invisible, fully transparent, zero-sized, click-through, still
-outside the viewport, or covered by something else. Each of those is an error naming what is
-in the way, never a `clicked` line.
+outside the viewport, or covered by something else. It waits up to 3 seconds for that to pass
+(a menu fading in is transparent for its first frames); after that, each is an error naming
+what is in the way, never a `clicked` line.
 
 **And it dispatches what a real press dispatches** — `pointerdown`, `mousedown`, `pointerup`,
 `mouseup`, then the native activation. `element.click()` alone fires one `click` event and no
 pointer or mouse events at all, so every control that opens on `mousedown` (most custom
-dropdowns, menus, drag handles) did nothing while peek printed success.
+dropdowns, menus, drag handles) did nothing while peek printed success. An element with no
+native `click()` — an `<svg>`, which is what an icon button is — gets the `click` event
+dispatched instead, so the press is never left halfway.
 
 The same gate covers `rightclick`, `dblclick` and `hover`. Hovering a disabled control is
 allowed — that is how its tooltip is read — so only being unseeable or covered refuses there.
@@ -331,8 +397,10 @@ peek --port $PORT select Country Spain
 peek --port $PORT select "Leave type" Vacation
 
 # Works with custom widget dropdowns (e.g. React Select, S.Select)
-peek --port $PORT select "Booking type" "Green Fee 18"
+peek --port $PORT select "Service" "Green Fee 18"
 ```
+
+A native `<select>` matches an option by its text — no-break spaces and accents read as typed — or by its value (`select "Idioma principal" en-US`).
 
 If the dropdown trigger doesn't have a standard input role (textbox, combobox), `select` falls back to finding it by visible text.
 
@@ -355,6 +423,7 @@ Type raw text into the currently focused element.
 
 ```bash
 peek --port $PORT type "hello world"
+peek --port $PORT type --stdin < pw   # a password: never in the process list nor the output
 ```
 
 #### press
@@ -376,6 +445,16 @@ Hover over an element. Supports `--css` and `--id` flags.
 ```bash
 peek --port $PORT hover "Settings"
 peek --port $PORT hover --css ".menu-item" "Reports"
+```
+
+#### scroll
+
+Scroll the page down by that many pixels, or up when negative; a screen by default. Paced, it
+is trackpad flicks with the pointer where it rests.
+
+```bash
+peek --port $PORT scroll          # a screen down
+peek --port $PORT scroll -400     # 400px up
 ```
 
 #### drag
@@ -430,10 +509,12 @@ nothing reads as proof the operation finished.
 
 #### wait --url
 
-Wait for the URL to contain a pattern.
+Wait for the URL to contain a piece of text, or with `--url-re` to match a regular expression
+(an address with an id in it).
 
 ```bash
 peek --port $PORT wait --url /admin/dashboard
+peek wait --url-re '/apps/[0-9]+/'
 ```
 
 ---
@@ -628,6 +709,16 @@ peek test tests/                          # run all .peek files in directory (re
 peek test tests/login.peek                 # run a single test
 peek --headless test tests/               # headless mode (no browser window)
 peek -w 4 --headless test tests/          # 4 tests in parallel
+```
+
+#### shots, compare
+
+A set of screenshots of a back office, one PNG per screen, and the comparison of two sets.
+How to use them: `docs/BROWSER_TESTING.md`, "Before and after: every screen".
+
+```bash
+peek --port $PORT shots shots/before      # every screen of the signed-in back office
+peek compare shots/before shots/after shots/diff   # report.md lists what differs
 ```
 
 ---

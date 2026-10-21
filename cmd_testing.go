@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+
 	"bufio"
 	"fmt"
 	"io/fs"
@@ -82,15 +84,18 @@ func cmdTest(ctx *cmdContext, args []string) error {
 			return fmt.Errorf("cannot access %s: %w", p, err)
 		}
 		if info.IsDir() {
-			filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
+			err := filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
-					return nil
+					return err
 				}
 				if !d.IsDir() && strings.HasSuffix(path, ".peek") {
 					files = append(files, path)
 				}
 				return nil
 			})
+			if err != nil {
+				return fmt.Errorf("walk %s: %w", p, err)
+			}
 		} else {
 			files = append(files, p)
 		}
@@ -508,7 +513,7 @@ func assertText(ctx *cmdContext, text string, timeout time.Duration) error {
 			if node.Ignored {
 				continue
 			}
-			name := axValueStr(node.Name)
+			name := browse.AXValueStr(node.Name)
 			if name != "" && strings.Contains(strings.ToLower(name), lower) {
 				return nil
 			}
@@ -537,7 +542,7 @@ func assertGone(ctx *cmdContext, text string, timeout time.Duration) error {
 			if node.Ignored {
 				continue
 			}
-			name := axValueStr(node.Name)
+			name := browse.AXValueStr(node.Name)
 			if name != "" && strings.Contains(strings.ToLower(name), lower) {
 				found = true
 				break

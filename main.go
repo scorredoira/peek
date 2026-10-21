@@ -17,6 +17,7 @@ func main() {
 	port := defaultPort
 	portSet := false
 	headless := false
+	paced := false
 	workers := 1
 	args := os.Args[1:]
 
@@ -35,6 +36,9 @@ func main() {
 			args = args[2:]
 		} else if args[0] == "--headless" {
 			headless = true
+			args = args[1:]
+		} else if args[0] == "--paced" {
+			paced = true
 			args = args[1:]
 		} else if args[0] == "--workers" || args[0] == "-w" {
 			if len(args) < 2 {
@@ -59,7 +63,19 @@ func main() {
 	cmd := args[0]
 	cmdArgs := args[1:]
 
-	ctx := &cmdContext{port: port, headless: headless, workers: workers}
+	if cmd == "-h" || cmd == "--help" || cmd == "help" {
+		printUsage()
+		return
+	}
+
+	ctx := &cmdContext{port: port, headless: headless, workers: workers, paced: paced}
+
+	// a press or a keystroke goes at a person's pace when asked to (--paced, unlock --paced)
+	switch cmd {
+	case "click", "rightclick", "rclick", "dblclick", "fill", "select", "type", "press", "hover",
+		"drag", "upload", "scroll":
+		pace(ctx)
+	}
 
 	var err error
 	switch cmd {
@@ -68,6 +84,16 @@ func main() {
 		err = cmdOpen(ctx, cmdArgs, portSet)
 	case "close":
 		err = cmdClose(ctx)
+	case "vault":
+		err = cmdVault(ctx, cmdArgs, portSet)
+	case "unlock":
+		err = cmdUnlock(ctx, cmdArgs, portSet)
+	case "lock":
+		err = cmdLock(cmdArgs)
+	case "restart":
+		err = cmdRestart(cmdArgs)
+	case "status":
+		err = cmdStatus(cmdArgs)
 
 	// Navigation
 	case "navigate", "nav":
@@ -110,6 +136,8 @@ func main() {
 		err = cmdPress(ctx, cmdArgs)
 	case "hover":
 		err = cmdHover(ctx, cmdArgs)
+	case "scroll":
+		err = cmdScroll(ctx, cmdArgs)
 	case "drag":
 		err = cmdDrag(ctx, cmdArgs)
 	case "upload":
@@ -146,6 +174,10 @@ func main() {
 	// Testing
 	case "test":
 		err = cmdTest(ctx, cmdArgs)
+	case "shots":
+		err = cmdShots(ctx, cmdArgs)
+	case "compare":
+		err = cmdCompare(cmdArgs)
 
 	// Utilities
 	case "texts":
@@ -157,6 +189,8 @@ func main() {
 	case "_monitor":
 		cmdMonitor(cmdArgs)
 		return
+	case "_vaultwatch":
+		err = cmdVaultWatch(cmdArgs)
 
 	default:
 		fatal("unknown command: %s", cmd)
@@ -175,11 +209,27 @@ func fatal(format string, args ...any) {
 func printUsage() {
 	fmt.Print(`peek — browser remote operator
 
-Usage: peek [--port PORT] [--headless] [-w N] <command> [args...]
+Usage: peek [--port PORT] [--headless] [--paced] [-w N] <command> [args...]
+
+--paced: each press and keystroke waits half a second or more, never the same;
+         presses and hovers move the real pointer there, typing goes key by key,
+         scrolling goes in trackpad flicks
 
 Chrome:
   open [url]            Launch Chrome, print port number
   close                 Kill Chrome instance on this port
+
+Vaults (macOS: a profile that keeps its logins, in an encrypted disk image):
+  unlock [name] [url] [--paced]
+                        Ask for the password in the terminal, open a visible
+                        Chrome on the profile, print its port; name defaults to
+                        main; --paced: at a person's pace until it is locked
+  lock [name]           Close its Chrome and lock it (closing the window does
+                        too); name defaults to main
+  vault new <name>      Create one; asks for its password
+  restart [name]        Close the unlocked vault's Chrome and start it again,
+                        without locking it; name defaults to main
+  status                Every vault, locked or unlocked, and its Chrome's port
 
 Navigation:
   navigate <url>       Go to URL
@@ -189,7 +239,7 @@ Navigation:
   resize <w> <h>       Resize browser window
 
 Inspection:
-  snapshot [--verbose]  Print accessibility tree
+  snapshot [--verbose]  Print accessibility tree; [N] before a node is its --ref
   screenshot [path] [--full] [--png] [--quality N]
              [--css sel | --clip x,y,w,h] [--scale N]
                         Screenshot (default: /tmp/peek.jpg). --css or --clip
@@ -202,21 +252,25 @@ Inspection:
   html                  Print page HTML
 
 Interaction:
-  click [--css sel] [--id id] [--index N] [text]   Click element
-  rightclick [--css sel] [--id id] [--index N] [text] Right-click element (context menu)
-  dblclick [--css sel] [--id id] [--index N] [text] Double-click element
+  click [--css sel] [--id id] [--ref N] [--index N] [--role r] [text]   Click element;
+                        --role keeps only that accessibility role (tab, link, checkbox…)
+  rightclick [--css sel] [--id id] [--ref N] [--index N] [text] Right-click element (context menu)
+  dblclick [--css sel] [--id id] [--ref N] [--index N] [text] Double-click element
   fill <label> <value>  Fill input field by label
   select <label> <val>  Select dropdown option
   type <text>           Type raw text into focused element
+  type --stdin          Type what standard input holds, never printed (a password)
   press <key>           Press key (Enter, Tab, Escape, etc.)
-  hover [--css sel] [--id id] [text]   Hover over element
+  hover [--css sel] [--id id] [--ref N] [text]   Hover over element
+  scroll [pixels]       Scroll down that much (negative is up), a screen by default
   drag <from> <to>      Drag element to another
   upload <sel> <file>   Upload file to input
 
 Waits:
   wait <text>           Wait for text to appear
   wait --gone <text>    Wait for text to disappear
-  wait --url <pattern>  Wait for URL to match
+  wait --url <part>     Wait for the URL to contain it
+  wait --url-re <re>    Wait for the URL to match a regular expression
 
 Tabs:
   pages                 List open tabs (* marks the one in use)
@@ -238,6 +292,14 @@ Dialogs (never block: answered, and a confirm gets a no):
 
 Testing:
   test <path> [-w N]  Run .peek test files (recursive)
+  shots <dir> [--sizes 1440x900,390x844] [--clock 2026-10-10T10:00] [--only parts,…]
+                        One PNG per back-office screen (the menu, plus each
+                        list's first row) of the signed-in headless browser,
+                        frozen so two runs of the same code give the same
+                        pixels
+  compare <before> <after> <out>
+                        Compare two shot sets: a diff and a side by side per
+                        screen that changed, and report.md listing them
 
 Utilities:
   texts --css <sel>     List texts of matching elements

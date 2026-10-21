@@ -23,7 +23,7 @@ import (
 //
 // It is idempotent and cheap, so every command that touches a page installs it without asking.
 //
-// Kept as a BODY because the two doors take different shapes: Eval is handed a function and
+// Kept as a BODY because the two entry points take different shapes: Eval is handed a function and
 // calls it, while a script registered for new documents is evaluated as source — an arrow
 // function there is created and thrown away, which installs nothing at all and looks exactly
 // like success. Building both forms from one body is what stops them drifting apart.

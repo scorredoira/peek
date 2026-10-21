@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+
 	"fmt"
 	"net"
 	"strconv"
@@ -61,6 +63,9 @@ func cmdTexts(ctx *cmdContext, args []string) error {
 	res, err := proto.RuntimeEvaluate{Expression: jsCode}.Call(page)
 	if err != nil {
 		return fmt.Errorf("failed: %w", err)
+	}
+	if err := browse.Thrown(res); err != nil {
+		return fmt.Errorf("css %q: %w", selector, err)
 	}
 
 	fmt.Println(res.Result.Value.Str())

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ type cmdContext struct {
 	headless bool
 	workers  int
 	pid      int // Chrome process ID (used by tests for cleanup)
+	// paced: a press or a keystroke waits as a person's would (--paced)
+	paced bool
 
 	// The backstop answer for native dialogs. Lives here rather than in a global because
 	// `peek test -w N` runs its files as goroutines in one process, each with its own
@@ -58,6 +61,13 @@ func connect(ctx *cmdContext) (*rod.Browser, *rod.Page, error) {
 	// the problem: a click that submits a form lands on a document nobody instrumented, and the
 	// throw it does on the way in is the message you most wanted. See capture.go.
 	installCapture(page)
+
+	// The phone width a resize asked for, again: Chrome drops a page's viewport override when
+	// the connection that set it closes, so without this every command after "peek resize
+	// 390 800" ran at the window's 500px minimum.
+	if err := applyViewport(ctx.port, page); err != nil {
+		return nil, nil, err
+	}
 
 	// Same reason, one step further: what the page's overrides cannot reach — a beforeunload
 	// above all — stops the page dead, and nothing this process does afterwards can reach it.
@@ -139,6 +149,50 @@ func rememberedTab(port int) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// viewportFile is where the viewport a resize asked for is remembered between commands.
+func viewportFile(port int) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("peek-%d.viewport", port))
+}
+
+func rememberViewport(port, width, height int) error {
+	return os.WriteFile(viewportFile(port), []byte(fmt.Sprintf("%d %d", width, height)), 0644)
+}
+
+func forgetViewport(port int) {
+	_ = os.Remove(viewportFile(port))
+}
+
+// applyViewport sets the page's viewport to the one remembered for this browser, if any.
+func applyViewport(port int, page *rod.Page) error {
+	data, err := os.ReadFile(viewportFile(port))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the remembered viewport: %w", err)
+	}
+	var width, height int
+	if _, err := fmt.Sscanf(string(data), "%d %d", &width, &height); err != nil {
+		return fmt.Errorf("the remembered viewport %q: %w", data, err)
+	}
+	// Set again only when it changed: setting it fires a resize, and every popup of the client
+	// closes on resize, so the menu a click opened was gone by the next command.
+	size, err := page.Eval(`() => innerWidth + " " + innerHeight`)
+	if err != nil {
+		return fmt.Errorf("read the viewport: %w", err)
+	}
+	if size.Value.Str() == fmt.Sprintf("%d %d", width, height) {
+		return nil
+	}
+	err = proto.EmulationSetDeviceMetricsOverride{
+		Width: width, Height: height, DeviceScaleFactor: 1, Mobile: false,
+	}.Call(page)
+	if err != nil {
+		return fmt.Errorf("set the viewport: %w", err)
+	}
+	return nil
 }
 
 // findPageTarget returns the tab every command acts on: the one explicitly selected while

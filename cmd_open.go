@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/scorredoira/peek/browse"
+
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,18 +39,17 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 		return nil
 	}
 
-	// A fresh Chrome inherits no tab choice from whatever ran on this port before.
+	// A fresh Chrome inherits no tab choice and no viewport from whatever ran on this port
+	// before.
 	forgetTab(port)
+	forgetViewport(port)
 
 	// Each port gets its own profile dir for full isolation.
 	dataDir := profileDir(port)
 
-	// Disable password manager via Chrome preferences.
-	defaultDir := filepath.Join(dataDir, "Default")
-	os.MkdirAll(defaultDir, 0755)
-	prefsPath := filepath.Join(defaultDir, "Preferences")
-	prefs := `{"credentials_enable_service":false,"profile":{"password_manager_enabled":false},"translate":{"enabled":false},"translate_blocked_languages":["en","es","fr","de","pt","it","zh","ja","ko","ru","ar"]}`
-	os.WriteFile(prefsPath, []byte(prefs), 0644)
+	if err := writeProfilePrefs(dataDir); err != nil {
+		return err
+	}
 
 	chromeArgs := []string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),
@@ -56,6 +58,9 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 		"--no-default-browser-check",
 		"--disable-default-apps",
 		"--disable-popup-blocking",
+		// a window covered by another (a simulator) still draws: macOS reports it hidden,
+		// and a hidden page presents no frame, so a capture waited for one for ever
+		"--disable-backgrounding-occluded-windows",
 		"--disable-translate",
 		"--disable-features=PasswordManagerOnboarding,PasswordManagerBubble,TranslateUI,Translate",
 		"--disable-component-update",
@@ -63,18 +68,38 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 		"--window-size=1280,900",
 	}
 
-	if ctx.headless {
-		chromeArgs = append(chromeArgs, "--headless=new")
+	// A Linux box with no display cannot run a headed Chrome, and what that looks like is
+	// not an error: Chrome starts, never opens its debugging port, and lingers — so peek
+	// gives up with "Chrome started but port not ready" and the reader goes hunting for a
+	// port problem. There is exactly one thing to do there, so peek does it and says so.
+	if !ctx.headless && runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" &&
+		os.Getenv("WAYLAND_DISPLAY") == "" {
+		fmt.Fprintln(os.Stderr, "peek: no display — running headless")
+		ctx.headless = true
 	}
 
-	chromePath, err := findChromePath()
+	if ctx.headless {
+		// Drawn without the GPU, whose rasterizing of a scaled picture or a gradient moved a
+		// few levels from one run to the next, and never put in the background, where a tab
+		// paints no frame: two captures of the same page give the same pixels (peek shots).
+		chromeArgs = append(chromeArgs, "--headless=new", "--disable-gpu",
+			"--force-color-profile=srgb", "--disable-renderer-backgrounding",
+			"--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows")
+	}
+
+	chromePath, err := browse.FindChromePath()
 	if err != nil {
 		return err
 	}
 
-	if runtime.GOOS == "darwin" {
-		chromeArgs = append(chromeArgs, "--password-store=basic", "--use-mock-keychain")
-	}
+	// The OS keyring is never peek's business, on any platform — and asking for it is not
+	// free: on a Linux box with no desktop session there is no D-Bus to answer, so Chrome
+	// BLOCKS on the password store the first time a navigation needs the cookie jar. It opens
+	// the TCP connection to the server and never sends the request, so the page hangs forever
+	// and every later command queues behind it — which reads as peek being broken while curl
+	// fetches the same URL instantly. These two flags were the macOS keychain prompt's cure
+	// and are every platform's.
+	chromeArgs = append(chromeArgs, "--password-store=basic", "--use-mock-keychain")
 
 	// Launched BLANK, and navigated below once a session exists. Handing Chrome the url here
 	// means it is already loading before anything can attach, so the first document — the one
@@ -97,8 +122,12 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 		if isPortOpen(port) {
 			// From here on this Chrome outlives the process that started it, so the
 			// reaper is armed before anything else can go wrong. See cmdMonitor.
+			// A monitor that did not start is said, not fatal: Chrome is already running and
+			// its port still has to reach the caller, who can close it or `scl kill` it.
 			touchUse(port)
-			startMonitor(port, chromeCmd.Process.Pid, ctx.headless)
+			if err := startMonitor(port, chromeCmd.Process.Pid, ctx.headless); err != nil {
+				fmt.Fprintf(os.Stderr, "peek: Chrome on port %d will not be reaped: %v\n", port, err)
+			}
 
 			// The port goes out FIRST, whatever happens next: Chrome is already running,
 			// and a caller who never learns its port has no way to close it.
@@ -152,36 +181,10 @@ func cmdClose(ctx *cmdContext) error {
 	}
 
 	forgetTab(ctx.port)
+	forgetViewport(ctx.port)
 
 	fmt.Printf("Chrome on port %d closed\n", ctx.port)
 	return nil
-}
-
-func findChromePath() (string, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", nil
-	case "linux":
-		path := findInPath("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
-		if path == "" {
-			return "", fmt.Errorf("Chrome not found. Install Google Chrome or Chromium")
-		}
-		return path, nil
-	case "windows":
-		path := findInPath(
-			`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-		)
-		if path == "" {
-			path = findInPath("chrome")
-		}
-		if path == "" {
-			return "", fmt.Errorf("Chrome not found. Install Google Chrome")
-		}
-		return path, nil
-	default:
-		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
-	}
 }
 
 // findFreePort finds the first available port starting from base.
@@ -201,6 +204,32 @@ func isPortOpen(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+// peekColour is the colour of a Chrome peek drives, as Chrome's theme takes it (ARGB as a signed
+// 32-bit number: #FF8800): its frame and bar are orange, so a person tells it from their own
+// at a glance. The page is not touched: a screenshot is the page's alone.
+const peekColour = -30720
+
+// profilePrefs turns off Chrome's password manager and its translation offers, and paints the
+// window peek's colour.
+const profilePrefs = `{"credentials_enable_service":false,` +
+	`"browser":{"theme":{"user_color2":-30720,"color_variant2":3}},` +
+	`"profile":{"password_manager_enabled":false},"translate":{"enabled":false},` +
+	`"translate_blocked_languages":["en","es","fr","de","pt","it","zh","ja","ko","ru","ar"]}`
+
+// writeProfilePrefs writes profilePrefs into the profile Chrome is about to start on.
+func writeProfilePrefs(dataDir string) error {
+	defaultDir := filepath.Join(dataDir, "Default")
+	if err := os.MkdirAll(defaultDir, 0755); err != nil {
+		return fmt.Errorf("create the Chrome profile: %w", err)
+	}
+
+	prefsPath := filepath.Join(defaultDir, "Preferences")
+	if err := os.WriteFile(prefsPath, []byte(profilePrefs), 0644); err != nil {
+		return fmt.Errorf("write the Chrome preferences: %w", err)
+	}
+	return nil
 }
 
 // profileDir is the throwaway Chrome profile a port gets. Its name is also how a leaked
@@ -245,15 +274,18 @@ func idleFor(port int) (time.Duration, bool) {
 // launched Chrome exits seconds later. This one is what survives it — including when the
 // parent is killed outright, which is how a test run that times out used to leave a browser
 // behind for good.
-func startMonitor(port, pid int, headless bool) {
+func startMonitor(port, pid int, headless bool) error {
 	exePath, err := os.Executable()
 	if err != nil {
-		return
+		return fmt.Errorf("find peek's own binary: %w", err)
 	}
 	m := exec.Command(exePath, "_monitor", strconv.Itoa(port), strconv.Itoa(pid), boolArg(headless))
 	m.Stdout = nil
 	m.Stderr = nil
-	m.Start()
+	if err := m.Start(); err != nil {
+		return fmt.Errorf("start the monitor: %w", err)
+	}
+	return nil
 }
 
 func boolArg(b bool) string {
@@ -301,7 +333,8 @@ func cmdMonitor(args []string) {
 
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/json/list", port))
 		if err != nil {
-			// Chrome is gone.
+			// Chrome is gone: its throwaway profile goes with it.
+			forgetProfile(port, proc)
 			return
 		}
 
@@ -319,17 +352,24 @@ func cmdMonitor(args []string) {
 
 		if !hasPages {
 			proc.Kill()
+			forgetProfile(port, proc)
 			return
 		}
 	}
 }
 
-func findInPath(names ...string) string {
-	for _, name := range names {
-		path, err := exec.LookPath(name)
-		if err == nil {
-			return path
-		}
+// forgetProfile deletes the throwaway profile of the Chrome on this port once it is gone: each
+// one weighs hundreds of megabytes, and they used to pile up in the temporary folder by the
+// gigabyte. Not while any Chrome answers on the port: a peek open that came after is using it.
+func forgetProfile(port int, proc *os.Process) {
+	deadline := time.Now().Add(10 * time.Second)
+	for proc.Signal(syscall.Signal(0)) == nil && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
 	}
-	return ""
+	if proc.Signal(syscall.Signal(0)) == nil || isPortOpen(port) {
+		return
+	}
+	if err := os.RemoveAll(profileDir(port)); err != nil {
+		fmt.Fprintf(os.Stderr, "peek: the profile of port %d stays: %v\n", port, err)
+	}
 }
