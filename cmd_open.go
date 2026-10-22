@@ -211,6 +211,10 @@ func isPortOpen(port int) bool {
 // at a glance. The page is not touched: a screenshot is the page's alone.
 const peekColour = -30720
 
+// mainVaultColour is the main vault's (#1A73E8): blue, so the window holding the person's own
+// logins is told from every other Chrome peek drives.
+const mainVaultColour = -15043608
+
 // profilePrefs turns off Chrome's password manager and its translation offers, and paints the
 // window peek's colour.
 const profilePrefs = `{"credentials_enable_service":false,` +

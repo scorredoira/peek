@@ -272,7 +272,7 @@ func vaultUnlock(ctx *cmdContext, name, url string, paced, portSet bool) error {
 	if !portSet {
 		port = findFreePort(ctx.port)
 	}
-	pid, err := startVaultChrome(mount, port, paced)
+	pid, err := startVaultChrome(name, mount, port, paced)
 	if err != nil {
 		// Never left open with no Chrome to close it.
 		if derr := detachVaultImage(mount); derr != nil {
@@ -297,10 +297,10 @@ func vaultUnlock(ctx *cmdContext, name, url string, paced, portSet bool) error {
 //
 // Unlike peek open, it writes no preferences: the profile is the person's and keeps what they
 // set in it. The keychain flags are peek open's: the profile is already encrypted by the image.
-func startVaultChrome(mount string, port int, paced bool) (int, error) {
+func startVaultChrome(name, mount string, port int, paced bool) (int, error) {
 	forgetTab(port)
 	forgetViewport(port)
-	if err := paintVaultProfile(filepath.Join(mount, "chrome")); err != nil {
+	if err := paintVaultProfile(filepath.Join(mount, "chrome"), vaultColour(name)); err != nil {
 		return 0, err
 	}
 
@@ -657,7 +657,7 @@ func cmdRestart(args []string) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	pid, err := startVaultChrome(mount, state.Port, state.Paced)
+	pid, err := startVaultChrome(name, mount, state.Port, state.Paced)
 	if err != nil {
 		return err
 	}
@@ -773,9 +773,17 @@ func hasPages(port int) (bool, error) {
 	return false, nil
 }
 
-// paintVaultProfile gives the vault's profile peek's colour, keeping every other preference the
+// vaultColour is the colour of a vault's window: the main vault's is its own, the rest peek's.
+func vaultColour(name string) int {
+	if name == defaultVault {
+		return mainVaultColour
+	}
+	return peekColour
+}
+
+// paintVaultProfile gives the vault's profile its colour, keeping every other preference the
 // person set in it: the window says it is the one peek drives.
-func paintVaultProfile(dataDir string) error {
+func paintVaultProfile(dataDir string, colour int) error {
 	dir := filepath.Join(dataDir, "Default")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create the vault's profile: %w", err)
@@ -799,7 +807,7 @@ func paintVaultProfile(dataDir string) error {
 	if theme == nil {
 		theme = map[string]any{}
 	}
-	theme["user_color2"] = peekColour
+	theme["user_color2"] = colour
 	theme["color_variant2"] = 3
 	browser["theme"] = theme
 	prefs["browser"] = browser

@@ -137,9 +137,9 @@ The password is read from the terminal, never from an argument or stdin, so a pr
 terminal (an agent's shell) cannot unlock. Closing the vault's last window locks it too. The
 person signs in to each site by hand once; the logins stay in the vault.
 
-- **Orange**: every Chrome peek opens with a window, the vault's too, has an orange frame and
-  bar, so it is told from the person's own at a glance. The page is not touched, nor any
-  screenshot.
+- **Orange, main in blue**: every Chrome peek opens with a window, the vaults' too, has an
+  orange frame and bar, so it is told from the person's own at a glance; the main vault's is
+  blue, so it is told from the rest. The page is not touched, nor any screenshot.
 - **A person's pace, when asked**: `peek unlock [name] --paced` (until it is locked) or
   `peek --paced <command>` makes every press and keystroke (click, fill, select, type, press,
   hover, drag, upload, scroll) wait half a second or more first, never the same: for the sites

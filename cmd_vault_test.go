@@ -80,7 +80,7 @@ func TestVaultProfileIsPaintedKeepingItsPreferences(t *testing.T) {
 	if err := os.WriteFile(prefs, []byte(`{"homepage":"https://prisnap.com","browser":{"show_home_button":true}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := paintVaultProfile(dir); err != nil {
+	if err := paintVaultProfile(dir, peekColour); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(prefs)
@@ -95,10 +95,10 @@ func TestVaultProfileIsPaintedKeepingItsPreferences(t *testing.T) {
 	}
 
 	fresh := t.TempDir()
-	if err := paintVaultProfile(fresh); err != nil {
+	if err := paintVaultProfile(fresh, vaultColour(defaultVault)); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(fresh, "Default", "Preferences")); err != nil || !strings.Contains(string(b), `"user_color2":-30720`) {
+	if b, err := os.ReadFile(filepath.Join(fresh, "Default", "Preferences")); err != nil || !strings.Contains(string(b), `"user_color2":-15043608`) {
 		t.Fatalf("a new profile: %s, %v", b, err)
 	}
 }
