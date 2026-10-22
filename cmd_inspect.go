@@ -30,13 +30,13 @@ func cmdSnapshot(ctx *cmdContext, args []string) error {
 }
 
 func getAccessibilityTree(page *rod.Page, verbose bool) (string, error) {
-	result, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+	nodes, err := browse.FullAXTree(page)
 	if err != nil {
-		return "", fmt.Errorf("accessibility tree failed: %w", err)
+		return "", err
 	}
 
 	var sb strings.Builder
-	for _, node := range result.Nodes {
+	for _, node := range nodes {
 		role := browse.AXValueStr(node.Role)
 		name := browse.AXValueStr(node.Name)
 		value := browse.AXValueStr(node.Value)

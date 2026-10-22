@@ -15,8 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // Background processes started by the "start" command, cleaned up after all tests.
@@ -504,12 +502,12 @@ func assertText(ctx *cmdContext, text string, timeout time.Duration) error {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+		nodes, err := browse.FullAXTree(page)
 		if err != nil {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		for _, node := range tree.Nodes {
+		for _, node := range nodes {
 			if node.Ignored {
 				continue
 			}
@@ -532,13 +530,13 @@ func assertGone(ctx *cmdContext, text string, timeout time.Duration) error {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+		nodes, err := browse.FullAXTree(page)
 		if err != nil {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
 		found := false
-		for _, node := range tree.Nodes {
+		for _, node := range nodes {
 			if node.Ignored {
 				continue
 			}

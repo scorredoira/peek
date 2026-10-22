@@ -43,12 +43,12 @@ func FindByRole(page *rod.Page, role, text string) (*rod.Element, error) {
 	deadline := time.Now().Add(retryTimeout)
 
 	for {
-		tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+		nodes, err := FullAXTree(page)
 		if err != nil {
-			return nil, fmt.Errorf("accessibility tree failed: %w", err)
+			return nil, err
 		}
 
-		el, err := pickByText(page, tree.Nodes, role, text)
+		el, err := pickByText(page, nodes, role, text)
 		if err != nil {
 			return nil, err
 		}
@@ -66,6 +66,38 @@ func FindByRole(page *rod.Page, role, text string) (*rod.Element, error) {
 	}
 }
 
+// FullAXTree is the accessibility tree of the page and of every frame drawn inside it: a
+// payment form in an iframe (a bank's page in a shop's checkout) is on the screen a person
+// looks at, so finding by text reaches it too. Chrome answers a tree per document, so each
+// frame of the page's process is asked on its own. A frame in another process (a site of
+// another origin, isolated) is a target of its own that this session does not drive: Chrome
+// refuses its tree, and it is left out.
+func FullAXTree(page *rod.Page) ([]*proto.AccessibilityAXNode, error) {
+	tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+	if err != nil {
+		return nil, fmt.Errorf("accessibility tree failed: %w", err)
+	}
+	nodes := tree.Nodes
+
+	frames, err := proto.PageGetFrameTree{}.Call(page)
+	if err != nil {
+		return nil, fmt.Errorf("frame tree failed: %w", err)
+	}
+	var children []*proto.PageFrameTree
+	children = append(children, frames.FrameTree.ChildFrames...)
+	for len(children) > 0 {
+		frame := children[0]
+		children = append(children[1:], frame.ChildFrames...)
+
+		inner, err := proto.AccessibilityGetFullAXTree{FrameID: frame.Frame.ID}.Call(page)
+		if err != nil {
+			continue // another process's frame: not this session's to read
+		}
+		nodes = append(nodes, inner.Nodes...)
+	}
+	return nodes, nil
+}
+
 // FindInput finds an input element by its label in the accessibility tree.
 // Retries for up to 3 seconds if not found immediately.
 func FindInput(page *rod.Page, label string) (*rod.Element, error) {
@@ -73,12 +105,12 @@ func FindInput(page *rod.Page, label string) (*rod.Element, error) {
 	deadline := time.Now().Add(retryTimeout)
 
 	for {
-		tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+		nodes, err := FullAXTree(page)
 		if err != nil {
-			return nil, fmt.Errorf("accessibility tree failed: %w", err)
+			return nil, err
 		}
 
-		for _, node := range tree.Nodes {
+		for _, node := range nodes {
 			if node.Ignored {
 				continue
 			}
@@ -425,11 +457,11 @@ func findByID(page *rod.Page, id string) (*rod.Element, error) {
 // findByRef finds the node a snapshot printed as [ref]: its accessibility node id, which
 // stays the same while the node is on the page.
 func findByRef(page *rod.Page, ref string) (*rod.Element, error) {
-	tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+	nodes, err := FullAXTree(page)
 	if err != nil {
-		return nil, fmt.Errorf("accessibility tree failed: %w", err)
+		return nil, err
 	}
-	for _, node := range tree.Nodes {
+	for _, node := range nodes {
 		if string(node.NodeID) == ref {
 			return resolveAXNode(page, node)
 		}
@@ -603,11 +635,11 @@ func FindElement(page *rod.Page, q ElementQuery) (*rod.Element, error) {
 // obligatorio No seleccionado" in Play Console). Its required mark aside.
 func FindDropdownTrigger(page *rod.Page, label string) (*rod.Element, error) {
 	wanted := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.ToLower(label)), "*"))
-	tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+	nodes, err := FullAXTree(page)
 	if err != nil {
-		return nil, fmt.Errorf("accessibility tree failed: %w", err)
+		return nil, err
 	}
-	for _, node := range tree.Nodes {
+	for _, node := range nodes {
 		if node.Ignored {
 			continue
 		}
@@ -973,14 +1005,14 @@ func FieldValue(el *rod.Element) (string, error) {
 }
 
 func PresentInAXTree(page *rod.Page, text string) (bool, error) {
-	tree, err := proto.AccessibilityGetFullAXTree{}.Call(page)
+	nodes, err := FullAXTree(page)
 	if err != nil {
 		return false, err
 	}
 
 	lower := strings.ToLower(readable(text))
 
-	for _, node := range tree.Nodes {
+	for _, node := range nodes {
 		if node.Ignored {
 			continue
 		}

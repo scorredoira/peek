@@ -218,3 +218,35 @@ func TestFindDropdownTriggerByItsLabel(t *testing.T) {
 		t.Fatal("a label nothing starts with must not be found")
 	}
 }
+
+// A form in an iframe of the page (a bank's card form in a shop's checkout) is on the screen a
+// person looks at: its button is found and pressed by its text like any other.
+func TestClickReachesAButtonInAFrame(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+
+	err = page.page.SetDocumentContent(`<iframe srcdoc="<button onclick=&quot;parent.paid = true&quot;>Pay now</button>"></iframe>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Wait("Pay now"); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Click("Pay now"); err != nil {
+		t.Fatal(err)
+	}
+	paid, err := page.Eval(`() => window.paid === true`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paid != true {
+		t.Fatal("the button in the frame was not pressed")
+	}
+}
