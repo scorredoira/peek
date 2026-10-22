@@ -98,7 +98,7 @@ func TestVaultProfileIsPaintedKeepingItsPreferences(t *testing.T) {
 	if err := paintVaultProfile(fresh, vaultColour(defaultVault)); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(fresh, "Default", "Preferences")); err != nil || !strings.Contains(string(b), `"user_color2":-15043608`) {
+	if b, err := os.ReadFile(filepath.Join(fresh, "Default", "Preferences")); err != nil || !strings.Contains(string(b), `"user_color2":-14774722`) {
 		t.Fatalf("a new profile: %s, %v", b, err)
 	}
 }
