@@ -3,8 +3,11 @@ package main
 import (
 	"math"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/scorredoira/peek/browse"
 
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
@@ -148,4 +151,54 @@ func lineDistance(p, a, b proto.Point) float64 {
 		return math.Hypot(p.X-a.X, p.Y-a.Y)
 	}
 	return math.Abs((p.X-a.X)*dy-(p.Y-a.Y)*dx) / l
+}
+
+// Select-all is the keys a person presses, trusted, and it empties a contenteditable as well as
+// an input, which select() never reached.
+func TestSelectAllEmptiesTheFieldWithRealKeys(t *testing.T) {
+	if _, err := browse.FindChromePath(); err != nil {
+		t.Skipf("no Chrome on this machine: %v", err)
+	}
+	chrome, err := browse.Launch(browse.LaunchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer chrome.Close()
+	page, err := chrome.Browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, field := range []string{`<input id=f value="old text">`, `<div id=f contenteditable>old text</div>`} {
+		page.MustEval(`html => {
+			document.body.innerHTML = html
+			window.keys = []
+			if (!window.listening) {
+				window.listening = true
+				addEventListener('keydown', e => keys.push(e.isTrusted + ' ' + e.key + ' ' + (e.metaKey || e.ctrlKey)))
+			}
+		}`, field)
+		el := page.MustElement("#f")
+		el.MustEval(`() => this.focus()`)
+
+		tp := &typist{page: page, rng: newRand(), nextAt: time.Now()}
+		if err := tp.selectAll(); err != nil {
+			t.Fatal(err)
+		}
+		if err := tp.backspace(); err != nil {
+			t.Fatal(err)
+		}
+		if err := tp.releaseAll(); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, _ := browse.FieldValue(el); got != "" {
+			t.Errorf("%s: still holds %q", field, got)
+		}
+		keys := page.MustEval(`() => keys.join(', ')`).Str()
+		if !strings.HasPrefix(keys, "true Meta true, true a true, true Backspace false") &&
+			!strings.HasPrefix(keys, "true Control true, true a true, true Backspace false") {
+			t.Errorf("%s: keys were %s", field, keys)
+		}
+	}
 }

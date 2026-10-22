@@ -479,16 +479,23 @@ func keyEvents(code, key, text string, modifiers int) (*proto.InputDispatchKeyEv
 
 // withShift holds Shift across one key, as a person does: Shift first, let go last.
 func (t *typist) withShift(code, key, text string) error {
+	down, up := keyEvents(code, key, text, 8)
+	return t.withModifier("ShiftLeft", "Shift", 8, down, up)
+}
+
+// withModifier holds a modifier across one key: the modifier first, let go last. Its own
+// keydown already carries it, as a real one does.
+func (t *typist) withModifier(modCode, modKey string, mask int, down, up *proto.InputDispatchKeyEvent) error {
 	if err := t.releaseAll(); err != nil {
 		return err
 	}
-	shiftDown, shiftUp := keyEvents("ShiftLeft", "Shift", "", 0)
+	modDown, modUp := keyEvents(modCode, modKey, "", mask)
+	modUp.Modifiers = 0
 	time.Sleep(time.Until(t.nextAt))
-	if err := shiftDown.Call(t.page); err != nil {
+	if err := modDown.Call(t.page); err != nil {
 		return err
 	}
 	t.nextAt = time.Now().Add(logNormal(t.rng, 90, 0.3, 40*time.Millisecond, 200*time.Millisecond))
-	down, up := keyEvents(code, key, text, 8)
 	if err := t.press(down, up); err != nil {
 		return err
 	}
@@ -496,7 +503,20 @@ func (t *typist) withShift(code, key, text string) error {
 		return err
 	}
 	sleepBetween(t.rng, 15*time.Millisecond, 60*time.Millisecond)
-	return shiftUp.Call(t.page)
+	return modUp.Call(t.page)
+}
+
+// selectAll is ⌘A (Ctrl+A off a Mac). On a Mac the shortcut is the system's, not Chrome's, so
+// a key sent over the protocol selects nothing by itself: it carries the editing command.
+func (t *typist) selectAll() error {
+	modCode, modKey, mask := "ControlLeft", "Control", 2
+	if runtime.GOOS == "darwin" {
+		modCode, modKey, mask = "MetaLeft", "Meta", 4
+	}
+	down, up := keyEvents("KeyA", "a", "", mask)
+	down.WindowsVirtualKeyCode, up.WindowsVirtualKeyCode = 65, 65
+	down.Commands = []string{"selectAll"}
+	return t.withModifier(modCode, modKey, mask, down, up)
 }
 
 // typeRune types one character with the keys a person would press for it.
@@ -620,12 +640,12 @@ func humanFill(ctx *cmdContext, page *rod.Page, el *rod.Element, value string) (
 	if err := humanPress(ctx, page, el, "click"); err != nil {
 		return "", err
 	}
-	// what it held goes the way a person's select-all and delete would take it
-	if _, err := el.Eval(`() => { if (this.select && this.value) { this.select() } }`); err != nil {
-		return "", fmt.Errorf("cannot select the field: %w", err)
-	}
+	// what it held goes the way a person takes it: select-all, then delete
 	if current, _ := browse.FieldValue(el); current != "" {
 		t := &typist{page: page, rng: newRand(), nextAt: time.Now()}
+		if err := t.selectAll(); err != nil {
+			return "", fmt.Errorf("cannot select the field: %w", err)
+		}
 		if err := t.backspace(); err != nil {
 			return "", err
 		}
