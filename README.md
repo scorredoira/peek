@@ -342,7 +342,8 @@ scrolled into view and checked: disabled (including `aria-disabled` and a disabl
 outside the viewport, or covered by something else. It waits up to 3 seconds for that to pass
 (a menu fading in is transparent for its first frames); after that, each is an error naming
 what is in the way, never a `clicked` line. A transparent one names the element it measured
-and the animations running on it.
+and the animations running on it. A button the page draws again while it is being
+pressed (a bar painted anew) is found again and the one on screen is pressed.
 
 **And it dispatches what a real press dispatches** — `pointerdown`, `mousedown`, `pointerup`,
 `mouseup`, then the native activation. `element.click()` alone fires one `click` event and no

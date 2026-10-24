@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -713,6 +714,9 @@ func DescribeQuery(q ElementQuery) string {
 // Facts, not a verdict: hovering something disabled is legitimate, clicking it is not, so
 // each command reads the ones it cares about.
 type Reach struct {
+	// Gone is an element no longer on the page: the page drew it again, and the one on
+	// screen now is another element
+	Gone     bool
 	Disabled bool
 	Unseen   string // why it cannot be seen, or ""
 	Covered  string // what is painted on top, or ""
@@ -741,6 +745,9 @@ type Reach struct {
 // under a press nobody scrolled to is what a site watching for machines looks for.
 func CheckReach(el *rod.Element) (Reach, error) {
 	res, err := el.Eval(`() => {
+		// taken off the page (its screen drew it again): its style reads as empty, which
+		// would be judged transparent
+		if (!this.isConnected) { return { gone: true } }
 		const box = this.getBoundingClientRect()
 		if (box.top < 0 || box.left < 0 || box.bottom > innerHeight || box.right > innerWidth) {
 			this.scrollIntoView({ block: "center", inline: "center" })
@@ -816,6 +823,10 @@ func CheckReach(el *rod.Element) (Reach, error) {
 	}
 
 	var r Reach
+	if v, ok := facts["gone"].(bool); ok && v {
+		r.Gone = true
+		return r, nil
+	}
 	if v, ok := facts["disabled"].(bool); ok {
 		r.Disabled = v
 	}
@@ -826,14 +837,19 @@ func CheckReach(el *rod.Element) (Reach, error) {
 	return r, nil
 }
 
+// ErrGone is a press refused because its element was taken off the page: whoever found it
+// finds it again.
+var ErrGone = errors.New("no longer on the page; it was drawn again")
+
 // RefuseUnclickable is the check every pressing command goes through. Like finding, it waits
 // up to 3 seconds: a menu fading in is transparent for its first frames, and a person waits
-// for it too. What is still not pressable then is refused.
+// for it too. What is still not pressable then is refused. An element taken off the page is
+// refused at once with ErrGone: waiting cannot bring it back.
 func RefuseUnclickable(el *rod.Element, desc string) error {
 	deadline := time.Now().Add(retryTimeout)
 	for {
 		err := refuseUnclickableNow(el, desc)
-		if err == nil || time.Now().After(deadline) {
+		if err == nil || errors.Is(err, ErrGone) || time.Now().After(deadline) {
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -847,6 +863,9 @@ func refuseUnclickableNow(el *rod.Element, desc string) error {
 		return err
 	}
 
+	if r.Gone {
+		return fmt.Errorf("%s: %w", desc, ErrGone)
+	}
 	if r.Disabled {
 		return fmt.Errorf("%s is disabled — a user cannot press it, and pressing it does nothing",
 			desc)

@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -276,5 +277,50 @@ func TestClickReachesAButtonInAFrame(t *testing.T) {
 	}
 	if paid != true {
 		t.Fatal("the button in the frame was not pressed")
+	}
+}
+
+// A screen that draws its bar again replaces its buttons: a press reaches the button now on the
+// page, as a person's does, never the one taken away (whose style reads as transparent).
+func TestClickReachesAButtonDrawnAgain(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+
+	err = page.page.SetDocumentContent(`<div id="bar"><button>Delete page</button></div>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	el, err := FindByText(page.page, "Delete page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.page.Eval(`() => {
+		const bar = document.getElementById("bar")
+		bar.innerHTML = ""
+		const button = document.createElement("button")
+		button.textContent = "Delete page"
+		button.addEventListener("click", () => { window.pressed = true })
+		bar.appendChild(button)
+	}`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RefuseUnclickable(el, `"Delete page"`)
+	if !errors.Is(err, ErrGone) {
+		t.Fatalf("a button taken off the page must be told apart, got %v", err)
+	}
+	if err := page.Click("Delete page"); err != nil {
+		t.Fatalf("the button drawn again was not pressed: %v", err)
+	}
+	pressed, err := page.page.Eval(`() => window.pressed === true`)
+	if err != nil || !pressed.Value.Bool() {
+		t.Fatalf("the press did not reach the button drawn again: %v", err)
 	}
 }

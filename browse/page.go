@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,15 +120,23 @@ func (p *Page) Open(url string) error {
 
 // Click presses what a person would mean by text: a button, a link, a tab.
 func (p *Page) Click(text string) error {
-	el, err := FindByText(p.page, text)
-	if err != nil {
-		return err
-	}
 	desc := fmt.Sprintf("%q", text)
-	if err := RefuseUnclickable(el, desc); err != nil {
-		return err
+	deadline := time.Now().Add(retryTimeout)
+	for {
+		el, err := FindByText(p.page, text)
+		if err != nil {
+			return err
+		}
+		err = RefuseUnclickable(el, desc)
+		// the page drew it again between finding and pressing: the one on screen is pressed
+		if errors.Is(err, ErrGone) && time.Now().Before(deadline) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		return PressElement(el, "click")
 	}
-	return PressElement(el, "click")
 }
 
 // Fill types value into the field its label names.
