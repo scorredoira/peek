@@ -78,7 +78,7 @@ func TestClickWaitsForWhatIsFadingIn(t *testing.T) {
 	defer page.page.Close()
 
 	err = page.page.SetDocumentContent(`<button id="fading" style="opacity:0">Delete page</button>` +
-		`<button style="opacity:0">Never shown</button>`)
+		`<button class="never" style="opacity:0">Never shown</button>`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +101,34 @@ func TestClickWaitsForWhatIsFadingIn(t *testing.T) {
 	err = page.Click("Never shown")
 	if err == nil || !strings.Contains(err.Error(), "fully transparent") {
 		t.Fatalf("a button that stays transparent must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "button.never, no animation on it") {
+		t.Fatalf("the refusal must name what it measured, got %v", err)
+	}
+}
+
+// A refusal of something kept transparent by an animation names the animation and where it
+// stands, so a failure seen only on a loaded machine says what held it.
+func TestARefusedTransparentPressNamesItsAnimation(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+
+	err = page.page.SetDocumentContent(`<style>@keyframes hide { from { opacity: 0 } ` +
+		`to { opacity: 0 } }</style><button style="animation: hide 60s">Delete page</button>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = page.Click("Delete page")
+	if err == nil || !strings.Contains(err.Error(), "button, hide running at ") {
+		t.Fatalf("the refusal must name the animation, got %v", err)
 	}
 }
 

@@ -764,7 +764,17 @@ func CheckReach(el *rod.Element) (Reach, error) {
 		let unseen = ""
 		if (style.display === "none") { unseen = "not rendered (display:none)" }
 		else if (style.visibility === "hidden") { unseen = "invisible (visibility:hidden)" }
-		else if (Number(style.opacity) === 0) { unseen = "fully transparent (opacity:0)" }
+		else if (Number(style.opacity) === 0) {
+			// what is transparent and why, so a refusal that only shows under load says
+			// which element it measured and what was moving it
+			const what = self.tagName.toLowerCase() +
+				Array.from(self.classList).map(c => "." + c).join("")
+			const moving = self.getAnimations().map(a =>
+				(a.animationName || a.transitionProperty || "animation") + " " + a.playState +
+				" at " + Math.round(Number(a.currentTime)) + "ms")
+			unseen = "fully transparent (opacity:0) — " + what +
+				(moving.length > 0 ? ", " + moving.join(", ") : ", no animation on it")
+		}
 		else if (r.width <= 0 || r.height <= 0) { unseen = "zero-sized" }
 		else if (style.pointerEvents === "none") { unseen = "click-through (pointer-events:none)" }
 		else if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) {

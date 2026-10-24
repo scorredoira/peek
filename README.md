@@ -341,7 +341,8 @@ scrolled into view and checked: disabled (including `aria-disabled` and a disabl
 `<fieldset>`), not rendered, invisible, fully transparent, zero-sized, click-through, still
 outside the viewport, or covered by something else. It waits up to 3 seconds for that to pass
 (a menu fading in is transparent for its first frames); after that, each is an error naming
-what is in the way, never a `clicked` line.
+what is in the way, never a `clicked` line. A transparent one names the element it measured
+and the animations running on it.
 
 **And it dispatches what a real press dispatches** — `pointerdown`, `mousedown`, `pointerup`,
 `mouseup`, then the native activation. `element.click()` alone fires one `click` event and no
