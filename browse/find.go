@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/proto"
 )
 
@@ -45,12 +46,15 @@ func FindByRole(page *rod.Page, role, text string) (*rod.Element, error) {
 
 	for {
 		nodes, err := FullAXTree(page)
-		if err != nil {
+		if err != nil && !cutByLeaving(err) {
 			return nil, err
 		}
 
-		el, err := pickByText(page, nodes, role, text)
-		if err != nil {
+		var el *rod.Element
+		if err == nil {
+			el, err = pickByText(page, nodes, role, text)
+		}
+		if err != nil && !cutByLeaving(err) {
 			return nil, err
 		}
 		if el != nil {
@@ -835,6 +839,19 @@ func CheckReach(el *rod.Element) (Reach, error) {
 	r.Link = fmt.Sprint(facts["href"])
 
 	return r, nil
+}
+
+// cutByLeaving is a question to the page that its going to another one cut: the document it
+// was asked of is gone, and the next one is what to ask. rod retries some of these itself
+// (page.Eval, a query's wait), not the one Chrome gives when the tab swaps its process for
+// another site's ("Inspected target navigated or closed").
+func cutByLeaving(err error) bool {
+	if errors.Is(err, cdp.ErrCtxNotFound) || errors.Is(err, cdp.ErrCtxDestroyed) {
+		return true
+	}
+	var e *cdp.Error
+	return errors.As(err, &e) && e.Code == -32000 &&
+		e.Message == "Inspected target navigated or closed"
 }
 
 // ErrGone is a press refused because its element was taken off the page: whoever found it

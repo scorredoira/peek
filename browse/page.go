@@ -169,7 +169,8 @@ func (p *Page) Wait(text string) error {
 	deadline := time.Now().Add(waitTimeout)
 	for {
 		found, err := p.Has(text)
-		if err != nil {
+		// asked as the page went to the next one: the next one is asked
+		if err != nil && !cutByLeaving(err) {
 			return err
 		}
 		if found {
