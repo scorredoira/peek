@@ -114,6 +114,32 @@ func TestFindByTextPrefersTheOneThatIsDrawn(t *testing.T) {
 	}
 }
 
+// A heading and a button that say the same, the heading on screen and the button below the
+// fold: the button is the one meant, and a click scrolls to it.
+func TestFindByTextPrefersTheControlToATextOnScreen(t *testing.T) {
+	page := chromePage(t)
+	html := `<html><body>
+		<h1 id="heading">Sign in</h1>
+		<div style="height: 5000px"></div>
+		<button id="button">Sign in</button>
+	</body></html>`
+	if err := page.SetDocumentContent(html); err != nil {
+		t.Fatalf("cannot set the page content: %v", err)
+	}
+
+	el, err := FindByText(page, "Sign in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := el.Attribute("id")
+	if err != nil || id == nil {
+		t.Fatalf("cannot read the element's id: %v", err)
+	}
+	if *id != "button" {
+		t.Fatalf("picked %q, want the button", *id)
+	}
+}
+
 func TestFindByRoleTakesTheTabOverTheLink(t *testing.T) {
 	page := chromePage(t)
 	html := `<html><body>

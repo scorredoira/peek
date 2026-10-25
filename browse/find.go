@@ -177,9 +177,41 @@ func pickByText(
 		return nil, nil
 	}
 
-	// Two passes: first one a person is looking at right now (its middle is on screen and it,
-	// not something over it or a scroller clipping it, is what is there), then one that is
-	// drawn at all — a click scrolls to it.
+	// Being on screen only chooses among candidates of the same kind: an exact match before a
+	// partial one, a control before its text. A heading that says "Sign in" over the form is on
+	// screen while the button under it waits below the fold, and the button is the one meant.
+	tiers := [][]*proto.AccessibilityAXNode{
+		interactiveOnly(exact, true), interactiveOnly(exact, false),
+		interactiveOnly(partial, true), interactiveOnly(partial, false),
+	}
+	for _, tier := range tiers {
+		el, err := pickDrawn(page, tier, text)
+		if err != nil || el != nil {
+			return el, err
+		}
+	}
+
+	return resolveAXNode(page, candidates[0])
+}
+
+// interactiveOnly keeps the nodes that are controls (want true) or that are not.
+func interactiveOnly(nodes []*proto.AccessibilityAXNode, want bool) []*proto.AccessibilityAXNode {
+	var out []*proto.AccessibilityAXNode
+	for _, node := range nodes {
+		_, interactive := interactiveRoles[AXValueStr(node.Role)]
+		if interactive == want {
+			out = append(out, node)
+		}
+	}
+	return out
+}
+
+// pickDrawn is, of candidates, the first one a person is looking at right now (its middle is
+// on screen and it, not something over it or a scroller clipping it, is what is there), then
+// the first one that is drawn at all — a click scrolls to it. Nil when none is drawn.
+func pickDrawn(
+	page *rod.Page, candidates []*proto.AccessibilityAXNode, text string,
+) (*rod.Element, error) {
 	var drawn *rod.Element
 	for _, node := range candidates {
 		el, err := resolveAXNode(page, node)
@@ -225,11 +257,7 @@ func pickByText(
 			}
 		}
 	}
-	if drawn != nil {
-		return drawn, nil
-	}
-
-	return resolveAXNode(page, candidates[0])
+	return drawn, nil
 }
 
 // findAXNodes lists the nodes of the accessibility tree with that name, best first:
