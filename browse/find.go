@@ -162,11 +162,12 @@ func FindInput(page *rod.Page, label string) (*rod.Element, error) {
 }
 
 // pickByText is the element a person would mean by that text: of the nodes it names (the
-// exact name first, then a name that contains it; interactive before static text), the first
-// one that is actually drawn. The same text is often on the page twice — a menu's link folded
+// exact name first, then a name that contains it; interactive before static text), the one
+// that is actually drawn. The same text is often on the page twice — a menu's link folded
 // away on a phone, a calendar popup's day kept in the DOM — and the hidden twin is never the
-// one meant. With none drawn it answers the best match anyway, so the command reports why it
-// cannot act on it. Nil when nothing matches.
+// one meant. Two drawn of the same kind are refused, never guessed: a "Delete" on every row
+// names none of them. With none drawn it answers the best match anyway, so the command
+// reports why it cannot act on it. Nil when nothing matches.
 func pickByText(
 	page *rod.Page, nodes []*proto.AccessibilityAXNode, role, text string,
 ) (*rod.Element, error) {
@@ -185,7 +186,7 @@ func pickByText(
 		interactiveOnly(partial, true), interactiveOnly(partial, false),
 	}
 	for _, tier := range tiers {
-		el, err := pickDrawn(page, tier, text)
+		el, err := pickDrawn(page, tier, role, text)
 		if err != nil || el != nil {
 			return el, err
 		}
@@ -206,59 +207,111 @@ func interactiveOnly(nodes []*proto.AccessibilityAXNode, want bool) []*proto.Acc
 	return out
 }
 
-// pickDrawn is, of candidates, the first one a person is looking at right now (its middle is
-// on screen and it, not something over it or a scroller clipping it, is what is there), then
-// the first one that is drawn at all — a click scrolls to it. Nil when none is drawn.
+// pickDrawn is, of candidates, the one that is drawn (a click scrolls to it) and nil when none
+// is. Two drawn are a refusal that lists them by their [ref], unless one holds the other (a link
+// around a button that says the same) — one thing to a person. Drawn and seen are told apart only
+// for the refusal, which says which ones are on screen.
 func pickDrawn(
-	page *rod.Page, candidates []*proto.AccessibilityAXNode, text string,
+	page *rod.Page, candidates []*proto.AccessibilityAXNode, role, text string,
 ) (*rod.Element, error) {
-	var drawn *rod.Element
+	type drawnNode struct {
+		node     *proto.AccessibilityAXNode
+		el       *rod.Element
+		onScreen bool
+	}
+	var drawn []drawnNode
+	seenBackend := map[proto.DOMBackendNodeID]bool{}
 	for _, node := range candidates {
+		if seenBackend[node.BackendDOMNodeID] {
+			continue
+		}
+		seenBackend[node.BackendDOMNodeID] = true
 		el, err := resolveAXNode(page, node)
 		if err != nil {
 			return nil, err
 		}
-		seen, err := el.Eval(`() => {
-			const rects = this.getClientRects()
-			if (rects.length === 0) { return 0 }
-			const style = getComputedStyle(this)
-			const box = rects[0]
-			if (style.visibility === "hidden" || box.width === 0 || box.height === 0) { return 0 }
-			const x = box.left + box.width / 2
-			const y = box.top + box.height / 2
-			if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) { return 1 }
-			// followed into shadow roots, as CheckReach does
-			let hit = document.elementFromPoint(x, y)
-			while (hit && hit.shadowRoot) {
-				const inner = hit.shadowRoot.elementFromPoint(x, y)
-				if (!inner || inner === hit) { break }
-				hit = inner
-			}
-			// a radio or checkbox drawn by a design library over its transparent input: the
-			// drawing is the control (CheckReach)
-			let self = this
-			if ((this.type === "radio" || this.type === "checkbox") && Number(style.opacity) === 0) {
-				let up = this.parentElement
-				while (up && (Number(getComputedStyle(up).opacity) === 0 ||
-					up.getBoundingClientRect().width <= 0)) { up = up.parentElement }
-				if (up) { self = up }
-			}
-			return hit != null && (hit === self || self.contains(hit)) ? 2 : 1
-		}`)
+		seen, err := el.Eval(drawnCode)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read whether %q is drawn: %w", text, err)
 		}
-		switch seen.Value.Int() {
-		case 2:
-			return el, nil
-		case 1:
-			if drawn == nil {
-				drawn = el
+		if seen.Value.Int() == 0 {
+			continue
+		}
+		same := false
+		for _, d := range drawn {
+			// one in another frame is never the same element, and Chrome refuses to compare
+			// objects of two documents
+			nested, err := el.Eval(`(other) => this === other || this.contains(other) || other.contains(this)`,
+				d.el.Object)
+			if err == nil && nested.Value.Bool() {
+				same = true
+				break
 			}
 		}
+		if !same {
+			drawn = append(drawn, drawnNode{node: node, el: el, onScreen: seen.Value.Int() == 2})
+		}
 	}
-	return drawn, nil
+
+	switch len(drawn) {
+	case 0:
+		return nil, nil
+	case 1:
+		return drawn[0].el, nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d things on the page say %q — say which one:", len(drawn), text)
+	roles := map[string]bool{}
+	for i, d := range drawn {
+		r := AXValueStr(d.node.Role)
+		roles[r] = true
+		if i == 8 {
+			fmt.Fprintf(&b, "\n  … and %d more", len(drawn)-i)
+			break
+		}
+		fmt.Fprintf(&b, "\n  [%s] %s %q", d.node.NodeID, r, readable(AXValueStr(d.node.Name)))
+		if d.onScreen {
+			b.WriteString(" (on screen)")
+		}
+	}
+	b.WriteString("\n  pick one with --ref <n>")
+	if role == "" && len(roles) > 1 {
+		b.WriteString(", or a kind with --role <role>")
+	}
+	return nil, errors.New(b.String())
 }
+
+// drawnCode is 2 for an element a person is looking at right now (its middle is on screen and
+// it, not something over it or a scroller clipping it, is what is there), 1 for one that is
+// drawn off screen, 0 for one that is not drawn at all.
+const drawnCode = `() => {
+	const rects = this.getClientRects()
+	if (rects.length === 0) { return 0 }
+	const style = getComputedStyle(this)
+	const box = rects[0]
+	if (style.visibility === "hidden" || box.width === 0 || box.height === 0) { return 0 }
+	const x = box.left + box.width / 2
+	const y = box.top + box.height / 2
+	if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) { return 1 }
+	// followed into shadow roots, as CheckReach does
+	let hit = document.elementFromPoint(x, y)
+	while (hit && hit.shadowRoot) {
+		const inner = hit.shadowRoot.elementFromPoint(x, y)
+		if (!inner || inner === hit) { break }
+		hit = inner
+	}
+	// a radio or checkbox drawn by a design library over its transparent input: the
+	// drawing is the control (CheckReach)
+	let self = this
+	if ((this.type === "radio" || this.type === "checkbox") && Number(style.opacity) === 0) {
+		let up = this.parentElement
+		while (up && (Number(getComputedStyle(up).opacity) === 0 ||
+			up.getBoundingClientRect().width <= 0)) { up = up.parentElement }
+		if (up) { self = up }
+	}
+	return hit != null && (hit === self || self.contains(hit)) ? 2 : 1
+}`
 
 // findAXNodes lists the nodes of the accessibility tree with that name, best first:
 // interactive roles by their priority, then static text, each in document order. A role keeps

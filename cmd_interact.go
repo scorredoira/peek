@@ -42,11 +42,14 @@ func cmdClick(ctx *cmdContext, args []string) error {
 		return err
 	}
 
+	watch := watchOutcome(ctx, page)
+	defer watch.stop()
 	if err := press(ctx, page, el, "click"); err != nil {
 		return err
 	}
 
 	fmt.Printf("clicked %s\n", browse.DescribeQuery(q))
+	watch.report()
 	return nil
 }
 
@@ -114,11 +117,14 @@ func cmdDblClick(ctx *cmdContext, args []string) error {
 		return err
 	}
 
+	watch := watchOutcome(ctx, page)
+	defer watch.stop()
 	if err := press(ctx, page, el, "dblclick"); err != nil {
 		return err
 	}
 
 	fmt.Printf("double-clicked %s\n", browse.DescribeQuery(q))
+	watch.report()
 	return nil
 }
 
@@ -251,6 +257,8 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 		return fmt.Errorf("cannot read the field: %w", err)
 	}
 
+	watch := watchOutcome(ctx, page)
+	defer watch.stop()
 	if strings.EqualFold(tag.Value.Str(), "select") {
 		if err := selectNativeOption(el, value); err != nil {
 			return err
@@ -262,6 +270,7 @@ func cmdSelect(ctx *cmdContext, args []string) error {
 	}
 
 	fmt.Printf("selected %q = %q\n", label, value)
+	watch.report()
 	return nil
 }
 
@@ -327,32 +336,37 @@ func selectFromPopup(page *rod.Page, el *rod.Element, value string) error {
 		var sels = [".Popup .row", ".Popup .option", ".Popup li", "[role=option]"];
 		var lower = %q.toLowerCase();
 		var all = [];
+		// the option that says exactly that, before one that only contains it: "Pro" is not
+		// "Pro Shop" listed above it
+		var exact = null, partial = null;
 		for (var s = 0; s < sels.length; s++) {
 			var els = document.querySelectorAll(sels[s]);
 			for (var i = 0; i < els.length; i++) {
 				if (!els[i].getClientRects().length) continue;
 				var t = els[i].textContent.replace(/\s+/g, " ").trim();
 				if (t) all.push(t);
-				if (t.toLowerCase() === lower || t.toLowerCase().indexOf(lower) !== -1) {
-					var el = els[i];
-					var r = el.getBoundingClientRect();
-					var opts = {
-						bubbles: true, cancelable: true, view: window,
-						clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
-						button: 0, buttons: 1,
-					};
-					el.dispatchEvent(new PointerEvent("pointerdown", opts));
-					el.dispatchEvent(new MouseEvent("mousedown", opts));
-					el.dispatchEvent(new PointerEvent("pointerup", opts));
-					el.dispatchEvent(new MouseEvent("mouseup", opts));
-					// Guarded like browse.PressElement's: an option row that is not an
-					// HTMLElement has no click(), and the throw would cost the
-					// press after its mouse events had already gone out.
-					if (el.click) { el.click(); }
-					else { el.dispatchEvent(new MouseEvent("click", opts)); }
-					return JSON.stringify({found: true});
-				}
+				if (!exact && t.toLowerCase() === lower) exact = els[i];
+				if (!partial && t.toLowerCase().indexOf(lower) !== -1) partial = els[i];
 			}
+		}
+		var el = exact || partial;
+		if (el) {
+			var r = el.getBoundingClientRect();
+			var opts = {
+				bubbles: true, cancelable: true, view: window,
+				clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+				button: 0, buttons: 1,
+			};
+			el.dispatchEvent(new PointerEvent("pointerdown", opts));
+			el.dispatchEvent(new MouseEvent("mousedown", opts));
+			el.dispatchEvent(new PointerEvent("pointerup", opts));
+			el.dispatchEvent(new MouseEvent("mouseup", opts));
+			// Guarded like browse.PressElement's: an option row that is not an
+			// HTMLElement has no click(), and the throw would cost the
+			// press after its mouse events had already gone out.
+			if (el.click) { el.click(); }
+			else { el.dispatchEvent(new MouseEvent("click", opts)); }
+			return JSON.stringify({found: true});
 		}
 		return JSON.stringify({found: false, options: all.slice(0, 60)});
 	})()`, value)
@@ -440,11 +454,21 @@ func cmdPress(ctx *cmdContext, args []string) error {
 		return err
 	}
 
+	// Enter and Space are what submit a form and press a button; a Tab or an arrow answers
+	// nothing worth the wait
+	var watch *outcomeWatch
+	if last := keys[len(keys)-1]; last == input.Enter || last == input.Space {
+		watch = watchOutcome(ctx, page)
+		defer watch.stop()
+	}
 	if err := page.KeyActions().Press(keys...).Do(); err != nil {
 		return fmt.Errorf("press failed: %w", err)
 	}
 
 	fmt.Printf("pressed %s\n", args[0])
+	if watch != nil {
+		watch.report()
+	}
 	return nil
 }
 

@@ -109,13 +109,20 @@ const captureBody = `
 
 	const failed = (what, url, detail) => keep('error', what + ' ' + url + ' — ' + detail)
 
+	// The requests still on their way: what an action is waiting for before it has an answer
+	// to report (outcome.go).
+	window.__peekInflight = 0
+
 	const fetchOrig = window.fetch
 	window.fetch = function (...args) {
 		const url = (args[0] && args[0].url) || String(args[0])
+		window.__peekInflight++
 		return fetchOrig.apply(this, args).then(response => {
+			window.__peekInflight--
 			if (!response.ok) { failed('fetch', url, response.status + ' ' + response.statusText) }
 			return response
-		}).catch(e => {
+		}, e => {
+			window.__peekInflight--
 			failed('fetch', url, e.message)
 			throw e
 		})
@@ -129,6 +136,65 @@ const captureBody = `
 		this.addEventListener('error', () => failed('xhr', url, 'network error'))
 		return openOrig.call(this, method, url, ...rest)
 	}
+
+	const sendOrig = XMLHttpRequest.prototype.send
+	XMLHttpRequest.prototype.send = function (...args) {
+		window.__peekInflight++
+		this.addEventListener('loadend', () => { window.__peekInflight-- }, { once: true })
+		return sendOrig.apply(this, args)
+	}
+
+	// What the page announces, as a screen reader hears it: a toast, an alert or a status line
+	// added, shown or changed inside a live region (aria-live, or the roles alert, alertdialog,
+	// status and log). Kept as it happens, so one that comes and goes between two looks is still
+	// there for the action that caused it to report (outcome.go). The document is observed, not
+	// its root, because on a new document this runs before the root exists.
+	window.__peekDoc = Math.random().toString(36).slice(2)
+	window.__peekSaid = []
+	window.__peekSaidCount = 0
+	const live = '[aria-live]:not([aria-live="off"]), [role="alert"], [role="alertdialog"], ' +
+		'[role="status"], [role="log"]'
+	// What is added is said, even the same words again (a second "Saved"); a region that only
+	// redraws what it already said is not.
+	const last = new WeakMap()
+	const said = (el, fresh) => {
+		if (!el.isConnected || el.getClientRects().length === 0) { return }
+		const text = String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim()
+		if (text === "" || (!fresh && last.get(el) === text)) { return }
+		last.set(el, text)
+		window.__peekSaid.push(text.slice(0, 300))
+		window.__peekSaidCount++
+		if (window.__peekSaid.length > 50) { window.__peekSaid.shift() }
+	}
+	// what was added inside a region is what it says now; a region that comes with the node
+	// says all it holds; a change of text or of what shows says the region that changed. One
+	// batch of changes says each element once: a document's parse adds a region, its text and
+	// the nodes around it, and all of those are the one thing it said.
+	const added = (node, say) => {
+		const el = node.nodeType === 1 ? node : node.parentElement
+		if (!el) { return }
+		if (el.parentElement && el.parentElement.closest(live)) { say.set(el, true); return }
+		if (el.matches(live)) { say.set(el, true) }
+		el.querySelectorAll(live).forEach(r => say.set(r, true))
+	}
+	new MutationObserver(records => {
+		const say = new Map()
+		for (const r of records) {
+			if (r.type === "childList") { r.addedNodes.forEach(n => added(n, say)); continue }
+			const el = r.target.nodeType === 1 ? r.target : r.target.parentElement
+			const region = el && el.closest(live)
+			if (region && !say.has(region)) { say.set(region, false) }
+		}
+		// an element said inside a region said in the same batch is part of what it said
+		for (const [el, fresh] of say) {
+			let up = el.parentElement, inside = false
+			for (; up; up = up.parentElement) { if (say.has(up)) { inside = true; break } }
+			if (!inside) { said(el, fresh) }
+		}
+	}).observe(document, {
+		subtree: true, childList: true, characterData: true, attributes: true,
+		attributeFilter: ["class", "style", "hidden", "aria-hidden", "open"],
+	})
 
 	// A native alert/confirm/prompt BLOCKS the renderer, and a CLI has nobody there to
 	// answer it: the page freezes and the next command times out with an error about

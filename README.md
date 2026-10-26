@@ -336,6 +336,25 @@ peek --port $PORT click --role tab "Pages"   # the tab, not a link with the same
 
 When using `--css` or `--id`, an optional text argument filters by text content (case-insensitive substring match).
 
+**Two drawn things that say the text are refused, never guessed** — a "Delete" on every row
+names none of them. The error lists each with its `[ref]`, and offers `--role` when they are of
+different kinds (a link and a tab). A hidden twin (a menu folded away) is not counted, nor a
+link around a button that says the same.
+
+**It says what the page answered.** Under the `clicked` line (and `dblclick`, `select`, and
+`press Enter`/`Space`) come what the page announced (a toast, an alert, a status line in a live
+region — even one gone before the click returned), the fields it marked invalid with their
+message, a confirm and how it was answered, the address it went to and a tab it opened. It
+waits for the page to be quiet first (no request of its own on the way, no document loading),
+up to 5 seconds:
+
+```
+clicked "Save"
+  the page said "Record saved"
+clicked "Send"
+  "Email" is marked invalid: "Required"
+```
+
 **It refuses a press a person could not make.** Before anything is dispatched the element is
 scrolled into view and checked: disabled (including `aria-disabled` and a disabled
 `<fieldset>`), not rendered, invisible, fully transparent, zero-sized, click-through, still

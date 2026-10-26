@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 )
 
@@ -140,7 +139,7 @@ func TestFindByTextPrefersTheControlToATextOnScreen(t *testing.T) {
 	}
 }
 
-func TestFindByRoleTakesTheTabOverTheLink(t *testing.T) {
+func TestFindByRoleTellsTheTabFromTheLink(t *testing.T) {
 	page := chromePage(t)
 	html := `<html><body>
 		<nav><a id="menu" href="#pages">Pages</a></nav>
@@ -150,25 +149,20 @@ func TestFindByRoleTakesTheTabOverTheLink(t *testing.T) {
 		t.Fatalf("cannot set the page content: %v", err)
 	}
 
-	byText, err := FindByText(page, "Pages")
-	if err != nil {
-		t.Fatal(err)
+	// by text alone it is either, and neither is guessed
+	if _, err := FindByText(page, "Pages"); err == nil || !strings.Contains(err.Error(), "--role") {
+		t.Fatalf("want a refusal that offers --role, got %v", err)
 	}
 	byRole, err := FindByRole(page, "tab", "Pages")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct {
-		el   *rod.Element
-		want string
-	}{{byText, "menu"}, {byRole, "tab"}} {
-		id, err := c.el.Attribute("id")
-		if err != nil || id == nil {
-			t.Fatalf("cannot read the element's id: %v", err)
-		}
-		if *id != c.want {
-			t.Fatalf("picked %q, want %q", *id, c.want)
-		}
+	id, err := byRole.Attribute("id")
+	if err != nil || id == nil {
+		t.Fatalf("cannot read the element's id: %v", err)
+	}
+	if *id != "tab" {
+		t.Fatalf("picked %q, want the tab", *id)
 	}
 
 	if _, err := FindByRole(page, "checkbox", "Pages"); err == nil {
@@ -211,5 +205,42 @@ func TestACoveredLinkSaysWhereItLeads(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "peek navigate") || !strings.Contains(err.Error(), "/mailbox/7") {
 		t.Fatalf("the refusal does not say where the link leads: %v", err)
+	}
+}
+
+// A "Delete" on every row names none of them: two drawn controls that say the same are refused,
+// each listed by the ref that picks it, never the first one guessed.
+func TestFindByTextRefusesTwoDrawnThatSayTheSame(t *testing.T) {
+	page := chromePage(t)
+	html := `<html><body>
+		<div><span>Ana</span> <button>Delete</button></div>
+		<div><span>Luis</span> <button>Delete</button></div>
+	</body></html>`
+	if err := page.SetDocumentContent(html); err != nil {
+		t.Fatalf("cannot set the page content: %v", err)
+	}
+
+	el, err := FindByText(page, "Delete")
+	if err == nil {
+		id, _ := el.Attribute("id")
+		t.Fatalf("picked one (%v), want a refusal", id)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `2 things on the page say "Delete"`) ||
+		strings.Count(msg, `button "Delete" (on screen)`) != 2 || !strings.Contains(msg, "--ref") {
+		t.Fatalf("the refusal should list both with their refs: %v", msg)
+	}
+}
+
+// A link around a button that says the same is one thing to a person, not two.
+func TestFindByTextTakesALinkAroundItsButtonAsOne(t *testing.T) {
+	page := chromePage(t)
+	html := `<html><body><a id="link" href="#x"><button id="button">Open</button></a></body></html>`
+	if err := page.SetDocumentContent(html); err != nil {
+		t.Fatalf("cannot set the page content: %v", err)
+	}
+
+	if _, err := FindByText(page, "Open"); err != nil {
+		t.Fatal(err)
 	}
 }
