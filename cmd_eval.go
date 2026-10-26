@@ -32,7 +32,7 @@ func cmdJS(ctx *cmdContext, args []string) error {
 	}
 
 	if res.ExceptionDetails != nil {
-		return fmt.Errorf("js error: %s", res.ExceptionDetails.Text)
+		return fmt.Errorf("js error: %s", jsException(res.ExceptionDetails))
 	}
 
 	if res.Result == nil {
@@ -57,4 +57,17 @@ func cmdJS(ctx *cmdContext, args []string) error {
 	}
 
 	return nil
+}
+
+// jsException is what a script threw, as the console would say it: the error and where
+// ("TypeError: Cannot read properties of null (reading 'innerText') at <anonymous>:1:41").
+// Chrome's own text is only "Uncaught", which says nothing of which line failed or why.
+func jsException(d *proto.RuntimeExceptionDetails) string {
+	if d.Exception != nil && d.Exception.Description != "" {
+		return d.Exception.Description
+	}
+	if d.Exception != nil && !d.Exception.Value.Nil() {
+		return d.Text + " " + d.Exception.Value.String()
+	}
+	return fmt.Sprintf("%s at line %d, column %d", d.Text, d.LineNumber+1, d.ColumnNumber+1)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod/lib/proto"
@@ -32,18 +33,14 @@ func cmdPages(ctx *cmdContext) error {
 		fmt.Printf("%s [%d] %s\n", mark, i, t.URL)
 	}
 
-	fmt.Println("\n* is the tab every command acts on. `peek page <index>` moves it.")
+	fmt.Println("\n* is the tab every command acts on. `peek page <index>` moves it; `peek page <words>`")
+	fmt.Println("picks the one tab whose address has them, wherever the person moved it.")
 	return nil
 }
 
 func cmdPage(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: peek page <index>")
-	}
-
-	idx, err := strconv.Atoi(args[0])
-	if err != nil {
-		return fmt.Errorf("invalid index: %s", args[0])
+		return fmt.Errorf("usage: peek page <index | words of its address>")
 	}
 
 	pages, err := listPageTargets(ctx.port)
@@ -51,10 +48,10 @@ func cmdPage(ctx *cmdContext, args []string) error {
 		return err
 	}
 
-	if idx < 0 || idx >= len(pages) {
-		return fmt.Errorf("index %d out of range (0-%d)", idx, len(pages)-1)
+	idx, err := pickPage(pages, args[0])
+	if err != nil {
+		return err
 	}
-
 	target := pages[idx]
 
 	browser, err := connectBrowser(ctx)
@@ -132,4 +129,34 @@ func cmdClosePage(ctx *cmdContext) error {
 
 	fmt.Printf("closed %q\n", title)
 	return nil
+}
+
+// pickPage is the tab arg names: its index, or else the one tab whose address holds arg (any
+// case). An index goes stale as soon as the person opens, closes or drags a tab, and the tab
+// that moved into its place may be one they are signed in on: the address names what is there.
+func pickPage(pages []chromeTarget, arg string) (int, error) {
+	var list strings.Builder
+	for i, t := range pages {
+		fmt.Fprintf(&list, "\n  [%d] %s", i, t.URL)
+	}
+	if idx, err := strconv.Atoi(arg); err == nil {
+		if idx < 0 || idx >= len(pages) {
+			return 0, fmt.Errorf("index %d out of range (0-%d):%s", idx, len(pages)-1, list.String())
+		}
+		return idx, nil
+	}
+	want := strings.ToLower(arg)
+	found := []int{}
+	for i, t := range pages {
+		if strings.Contains(strings.ToLower(t.URL), want) {
+			found = append(found, i)
+		}
+	}
+	if len(found) == 1 {
+		return found[0], nil
+	}
+	if len(found) == 0 {
+		return 0, fmt.Errorf("no tab's address has %q:%s", arg, list.String())
+	}
+	return 0, fmt.Errorf("%d tabs' addresses have %q, say more of it:%s", len(found), arg, list.String())
 }

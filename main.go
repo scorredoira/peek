@@ -274,7 +274,8 @@ Waits:
 
 Tabs:
   pages                 List open tabs (* marks the one in use)
-  page <index>          Switch to that tab, and stay there
+  page <index|words>    Switch to that tab, and stay there; words pick the one tab
+                        whose address has them, wherever the person moved it
   newpage [url]         Open new tab
   closepage             Close current tab
 
