@@ -94,6 +94,10 @@ func main() {
 		err = cmdRestart(cmdArgs)
 	case "status":
 		err = cmdStatus(cmdArgs)
+	case "recipes":
+		err = cmdRecipes(cmdArgs)
+	case "recipe":
+		err = cmdRecipe(cmdArgs)
 
 	// Navigation
 	case "navigate", "nav":
@@ -230,6 +234,11 @@ Vaults (macOS: a profile that keeps its logins, in an encrypted disk image):
   restart [name]        Close the unlocked vault's Chrome and start it again,
                         without locking it; name defaults to main
   status                Every vault, locked or unlocked, and its Chrome's port
+  recipes [vault]       How each task is done on a site with no API, kept in
+                        the unlocked vault: every recipe and its first line
+  recipe [vault/]<name> [--save]
+                        Print one; --save writes it from standard input,
+                        replacing it; never a password in one
 
 Navigation:
   navigate <url>       Go to URL

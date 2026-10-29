@@ -137,6 +137,18 @@ The password is read from the terminal, never from an argument or stdin, so a pr
 terminal (an agent's shell) cannot unlock. Closing the vault's last window locks it too. The
 person signs in to each site by hand once; the logins stay in the vault.
 
+**Recipes**: how a task is done on a site with no API (the addresses, what to press, what the
+page answers when it worked) is kept in the vault, in `recipes/<name>.md`, next to the logins
+it needs. Any agent driving the vault reads it there, and only while it is unlocked. Whoever
+does a task for the first time saves its recipe, and fixes it when the site has changed. A
+password never goes in one.
+
+```bash
+peek recipes                         # main's recipes, each with its first line
+peek recipe ionos-mailbox-password   # print one (another vault: apple/sign-in)
+peek recipe ionos-mailbox-password --save < recipe.md   # write it, replacing it
+```
+
 - **Orange, main in green**: every Chrome peek opens with a window, the vaults' too, has an
   orange frame and bar, so it is told from the person's own at a glance; the main vault's is
   green, so it is told from the rest. The page is not touched, nor any screenshot.

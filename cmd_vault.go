@@ -125,6 +125,9 @@ const vaultUsage = `peek vault — a Chrome profile that keeps its logins, in an
   peek restart [name]              Close the unlocked vault's Chrome and start it again,
                                    without locking it; name defaults to main
   peek status                      Every vault, locked or unlocked, and its port
+  peek recipes [vault]             The vault's recipes: how each task is done on a
+                                   site with no API, and its first line
+  peek recipe [vault/]<name>       Print one; --save writes it from standard input
 
 Vaults live in ~/.config/peek/vaults. The password is read from the terminal only.
 `
