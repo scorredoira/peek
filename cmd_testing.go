@@ -299,6 +299,9 @@ func runTest(headless bool, t *peekTest) testResult {
 		case "js":
 			err = cmdJS(ctx, args)
 
+		case "memory":
+			err = cmdMemory(ctx, args)
+
 		case "dialog":
 			err = cmdDialog(ctx, args)
 
@@ -414,7 +417,7 @@ func pageErrors(ctx *cmdContext, chromeStarted bool) ([]string, error) {
 // execAssert runs an assertion with automatic retry until timeout.
 func execAssert(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean|memory> <value>")
 	}
 
 	timeout := defaultTimeout
@@ -436,8 +439,14 @@ func execAssert(ctx *cmdContext, args []string) error {
 		return assertClean(ctx)
 	}
 
+	// memory is measured once, against the mark: collected garbage does not come back by
+	// waiting
+	if args[0] == "memory" {
+		return assertMemory(ctx, args[1:])
+	}
+
 	if len(args) < 2 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean|memory> <value>")
 	}
 
 	kind := args[0]

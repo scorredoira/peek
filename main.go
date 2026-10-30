@@ -178,6 +178,8 @@ func main() {
 	// Testing
 	case "test":
 		err = cmdTest(ctx, cmdArgs)
+	case "memory":
+		err = cmdMemory(ctx, cmdArgs)
 	case "shots":
 		err = cmdShots(ctx, cmdArgs)
 	case "compare":
@@ -302,6 +304,8 @@ Dialogs (never block: answered, and a confirm gets a no):
 
 Testing:
   test <path> [-w N]  Run .peek test files (recursive)
+  memory [mark]         What the tab keeps alive once its garbage is collected (nodes,
+                        listeners, heap, documents); mark keeps it for "assert memory"
   shots <dir> [--sizes 1440x900,390x844] [--clock 2026-10-10T10:00] [--only parts,…]
                         One PNG per back-office screen (the menu, plus each
                         list's first row) of the signed-in headless browser,
