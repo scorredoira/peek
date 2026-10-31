@@ -324,3 +324,39 @@ func TestClickReachesAButtonDrawnAgain(t *testing.T) {
 		t.Fatalf("the press did not reach the button drawn again: %v", err)
 	}
 }
+
+// Text a page draws in a shadow root of its own (an app inside a website's page) is on screen:
+// Wait finds it whole, though the accessibility tree splits it into the elements that hold it.
+func TestWaitFindsTextInAShadowRoot(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<p>the page</p><div id="host"></div><script>
+const root = document.getElementById("host").attachShadow({ mode: "open" })
+root.innerHTML = "<div><span>Starter plan</span> <span>· yearly</span></div><input value=\"kept\">"
+</script>`)
+	}))
+	defer server.Close()
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+
+	if err := page.Open(server.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Wait("Starter plan · yearly"); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := page.Has("kept"); err != nil || !has {
+		t.Fatalf("a field's value in a shadow root is on screen: %v %v", has, err)
+	}
+	if has, err := page.Has("not there"); err != nil || has {
+		t.Fatalf("text nowhere is not on screen: %v %v", has, err)
+	}
+}

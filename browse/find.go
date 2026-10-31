@@ -1166,8 +1166,23 @@ func PresentInText(page *rod.Page, text string) (bool, error) {
 		const body = document.body
 		if (!body) { return false }
 		if (readable(body.innerText).indexOf(wanted) >= 0) { return true }
-		for (const el of document.querySelectorAll("input, textarea")) {
-			if (readable(el.value).indexOf(wanted) >= 0) { return true }
+		// what a page draws in a shadow root of its own (an app inside a website's page) is
+		// on screen too, and body's innerText does not reach it
+		const roots = [document]
+		for (let i = 0; i < roots.length; i++) {
+			for (const el of roots[i].querySelectorAll("*")) {
+				if (el.shadowRoot) { roots.push(el.shadowRoot) }
+			}
+		}
+		for (const root of roots) {
+			if (root !== document) {
+				for (const child of root.children) {
+					if (readable(child.innerText).indexOf(wanted) >= 0) { return true }
+				}
+			}
+			for (const el of root.querySelectorAll("input, textarea")) {
+				if (readable(el.value).indexOf(wanted) >= 0) { return true }
+			}
 		}
 		return false
 	}`, readable(text))
