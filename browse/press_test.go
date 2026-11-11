@@ -220,3 +220,63 @@ func TestPressElementTogglesACheckboxAndSubmitsAForm(t *testing.T) {
 		t.Fatalf("checked and submitted = %q, want \"true true\"", got)
 	}
 }
+
+// A widget that saves its value on blur only saves what was typed if the press takes the focus
+// away, as a mouse does: a press on a plain row or label left the field focused, the field
+// never got its blur, and Save went out with the old value.
+func TestPressElementTakesTheFocusAwayFromTheFieldBeingEdited(t *testing.T) {
+	page := chromePage(t)
+	if err := page.SetDocumentContent(`<html><body><input id="field">` +
+		`<div id="target">Save</div><div id="kept">Keep</div><button id="button">Go</button>` +
+		`</body></html>`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.Eval(`() => {
+		window.blurred = 0
+		document.getElementById("field").addEventListener("blur", () => window.blurred++)
+		document.getElementById("kept").addEventListener("mousedown", e => e.preventDefault())
+	}`); err != nil {
+		t.Fatal(err)
+	}
+
+	focusField := func() {
+		if _, err := page.Eval(`() => document.getElementById("field").focus()`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := func() string {
+		res, err := page.Eval(`() => document.activeElement.id || document.activeElement.tagName`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Value.Str()
+	}
+	press := func(id string) {
+		el, err := FindElement(page, ElementQuery{CSS: "#" + id, Index: -1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := PressElement(el, "click"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	focusField()
+	press("target")
+	if got := active(); got != "BODY" {
+		t.Fatalf("after pressing a plain div the focus is on %q, want the body", got)
+	}
+
+	focusField()
+	press("button")
+	if got := active(); got != "button" {
+		t.Fatalf("after pressing a button the focus is on %q, want the button", got)
+	}
+
+	// a mousedown that prevents its default keeps the focus where it was, as in the browser
+	focusField()
+	press("kept")
+	if got := active(); got != "field" {
+		t.Fatalf("after pressing what prevents the mousedown the focus is on %q, want the field", got)
+	}
+}

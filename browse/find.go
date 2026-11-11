@@ -1030,8 +1030,16 @@ func PressElement(el *rod.Element, kind string) error {
 		}
 
 		this.dispatchEvent(new PointerEvent("pointerdown", opts))
-		this.dispatchEvent(new MouseEvent("mousedown", opts))
-		if (this.focus) { this.focus() }
+		// the focus moves on mousedown, unless a handler prevents it: to what is focusable
+		// around the press, or out of the field being edited, which gets its blur
+		if (this.dispatchEvent(new MouseEvent("mousedown", opts))) {
+			const focusable = this.closest('a[href], button, input, select, textarea, summary, [tabindex], [contenteditable=""], [contenteditable="true"]')
+			if (focusable && !focusable.disabled) {
+				focusable.focus({ preventScroll: true })
+			} else if (document.activeElement && document.activeElement !== document.body) {
+				document.activeElement.blur()
+			}
+		}
 		this.dispatchEvent(new PointerEvent("pointerup", opts))
 		this.dispatchEvent(new MouseEvent("mouseup", opts))
 		%s
