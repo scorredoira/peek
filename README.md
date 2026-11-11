@@ -790,6 +790,7 @@ Rules:
 | `assert gone <text>` | Text is NOT on the page |
 | `assert title <text>` | Page title contains text |
 | `assert js <expression>` | JavaScript expression returns truthy (a promise is awaited first) |
+| `assert error <text>` | The page reported an error with those words; from then on those errors do not fail the test |
 | `assert clean` | The page has reported no errors up to this point |
 
 Assertions retry automatically until they pass or timeout. No need for explicit waits or sleeps between actions and assertions.
@@ -798,7 +799,10 @@ Assertions retry automatically until they pass or timeout. No need for explicit 
 to mean only "no command returned an error" — a test could navigate, click through a form and
 pass with a stack trace behind it and every data call at 500. The captured errors are printed
 under the failure. `assert clean` is for saying WHERE: put it after the step you suspect and
-the failure names that line instead of the last one.
+the failure names that line instead of the last one. A test of a refusal (booking a blocked
+slot, saving a form with a field missing) causes its error on purpose: `assert error "No
+availability"` checks the page reported it, and the errors with those words no longer fail the
+test. A failed request carries what the server answered, so it is told by the same words.
 
 `start :PORT ...` **refuses a server this run did not start.** Sharing one server between
 parallel test files is the point and still works; what is refused is a leftover from a

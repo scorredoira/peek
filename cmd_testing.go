@@ -362,6 +362,7 @@ func runTest(headless bool, t *peekTest) testResult {
 		}
 	}
 
+	thrown = unexpectedErrors(ctx, thrown)
 	if len(thrown) > 0 {
 		return testResult{
 			test:       t,
@@ -418,7 +419,7 @@ func pageErrors(ctx *cmdContext, chromeStarted bool) ([]string, error) {
 // execAssert runs an assertion with automatic retry until timeout.
 func execAssert(ctx *cmdContext, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean|memory> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|error|clean|memory> <value>")
 	}
 
 	timeout := defaultTimeout
@@ -447,7 +448,7 @@ func execAssert(ctx *cmdContext, args []string) error {
 	}
 
 	if len(args) < 2 {
-		return fmt.Errorf("usage: assert <url|text|gone|title|js|clean|memory> <value>")
+		return fmt.Errorf("usage: assert <url|text|gone|title|js|error|clean|memory> <value>")
 	}
 
 	kind := args[0]
@@ -464,9 +465,51 @@ func execAssert(ctx *cmdContext, args []string) error {
 		return assertTitle(ctx, value, timeout)
 	case "js":
 		return assertJS(ctx, value, timeout)
+	case "error":
+		return assertError(ctx, value, timeout)
 	default:
 		return fmt.Errorf("unknown assert: %s", kind)
 	}
+}
+
+// assertError waits until the page reports an error with those words, and from then on the
+// errors that have them are the refusal the test set out to cause: they no longer fail it.
+func assertError(ctx *cmdContext, text string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		thrown, err := pageErrors(ctx, true)
+		if err != nil {
+			return err
+		}
+		for _, e := range thrown {
+			if strings.Contains(e, text) {
+				ctx.expectedErrors = append(ctx.expectedErrors, text)
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("assert error: the page reported no error with %q", text)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+// unexpectedErrors is what the page reported less the errors a test asserted.
+func unexpectedErrors(ctx *cmdContext, thrown []string) []string {
+	var left []string
+	for _, e := range thrown {
+		expected := false
+		for _, text := range ctx.expectedErrors {
+			if strings.Contains(e, text) {
+				expected = true
+				break
+			}
+		}
+		if !expected {
+			left = append(left, e)
+		}
+	}
+	return left
 }
 
 // assertClean fails when the page has reported anything wrong up to this point.
@@ -478,6 +521,7 @@ func assertClean(ctx *cmdContext) error {
 	if err != nil {
 		return err
 	}
+	thrown = unexpectedErrors(ctx, thrown)
 	if len(thrown) == 0 {
 		return nil
 	}

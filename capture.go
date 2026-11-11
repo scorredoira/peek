@@ -108,6 +108,11 @@ const captureBody = `
 	})
 
 	const failed = (what, url, detail) => keep('error', what + ' ' + url + ' — ' + detail)
+	// what the server answered a failed request, which says why ("No availability"), short
+	const answered = body => {
+		const text = String(body || "").replace(/\s+/g, " ").trim()
+		return text ? ': ' + text.slice(0, 300) : ""
+	}
 
 	// The requests still on their way: what an action is waiting for before it has an answer
 	// to report (outcome.go).
@@ -119,7 +124,11 @@ const captureBody = `
 		window.__peekInflight++
 		return fetchOrig.apply(this, args).then(response => {
 			window.__peekInflight--
-			if (!response.ok) { failed('fetch', url, response.status + ' ' + response.statusText) }
+			if (!response.ok) {
+				const status = response.status + ' ' + response.statusText
+				response.clone().text().then(body => failed('fetch', url, status + answered(body)),
+					() => failed('fetch', url, status))
+			}
 			return response
 		}, e => {
 			window.__peekInflight--
@@ -131,7 +140,11 @@ const captureBody = `
 	const openOrig = XMLHttpRequest.prototype.open
 	XMLHttpRequest.prototype.open = function (method, url, ...rest) {
 		this.addEventListener('load', () => {
-			if (this.status >= 400) { failed('xhr', url, this.status + ' ' + this.statusText) }
+			if (this.status >= 400) {
+				let body = ""
+				try { body = this.responseType === "" || this.responseType === "text" ? this.responseText : "" } catch (e) { }
+				failed('xhr', url, this.status + ' ' + this.statusText + answered(body))
+			}
 		})
 		this.addEventListener('error', () => failed('xhr', url, 'network error'))
 		return openOrig.call(this, method, url, ...rest)

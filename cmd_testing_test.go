@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,5 +56,64 @@ func TestAssertJSAwaitsAPromise(t *testing.T) {
 	}
 	if err := assertJS(ctx, "1 + 1 === 2", time.Second); err != nil {
 		t.Fatalf("a plain expression failed: %v", err)
+	}
+}
+
+// A test of a refusal (booking a blocked slot, saving a form with a field missing) gets a 4xx
+// on purpose: `assert error` says so, and the errors that say it no longer fail the test. The
+// failed request carries what the server answered, so it can be told by those words too.
+func TestAssertErrorExcusesTheRefusalItAsserts(t *testing.T) {
+	ctx := chromeForTest(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/save" {
+			http.Error(w, `{"error":"No availability at 08:00"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><body><button onclick="fetch('/save').then(r => r.text()).then(t => {
+			throw new Error(JSON.parse(t).error) })">Book</button></body></html>`)
+	}))
+	defer server.Close()
+
+	_, page, err := connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Navigate(server.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		t.Fatal(err)
+	}
+	if _, page, err = connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.Eval(`() => document.querySelector("button").click()`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := assertError(ctx, "Something else", 500*time.Millisecond); err == nil {
+		t.Fatal("an error the page never reported was asserted")
+	}
+	if err := assertError(ctx, "No availability", 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := pageErrors(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched := false
+	for _, e := range all {
+		if strings.HasPrefix(e, "fetch ") && strings.Contains(e, "No availability") {
+			fetched = true
+		}
+	}
+	if !fetched {
+		t.Fatalf("the failed request does not say what the server answered: %q", all)
+	}
+	if left := unexpectedErrors(ctx, all); len(left) != 0 {
+		t.Fatalf("the asserted refusal still fails the test: %q", left)
 	}
 }

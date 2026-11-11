@@ -26,6 +26,10 @@ type cmdContext struct {
 	// `peek test -w N` runs its files as goroutines in one process, each with its own
 	// context and its own port.
 	dialogs *dialogPolicy
+
+	// What a test asserted the page reports (assert error): the errors with these words are
+	// what it set out to cause, and do not fail it.
+	expectedErrors []string
 }
 
 // chromeTarget represents a target from Chrome's /json/list endpoint.
