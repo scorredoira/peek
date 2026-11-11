@@ -351,7 +351,9 @@ When using `--css` or `--id`, an optional text argument filters by text content 
 **Two drawn things that say the text are refused, never guessed** — a "Delete" on every row
 names none of them. The error lists each with its `[ref]`, and offers `--role` when they are of
 different kinds (a link and a tab). A hidden twin (a menu folded away) is not counted, nor a
-link around a button that says the same.
+link around a button that says the same. When only one of them is on screen, that one is
+pressed (a toolbar's "Actions" over a section's further down), and one that something covers
+on screen (a form's "Save" under a dialog's backdrop) is left out while another is not covered.
 
 **It says what the page answered.** Under the `clicked` line (and `dblclick`, `select`, and
 `press Enter`/`Space`) come what the page announced (a toast, an alert, a status line in a live

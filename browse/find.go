@@ -208,9 +208,11 @@ func interactiveOnly(nodes []*proto.AccessibilityAXNode, want bool) []*proto.Acc
 }
 
 // pickDrawn is, of candidates, the one that is drawn (a click scrolls to it) and nil when none
-// is. Two drawn are a refusal that lists them by their [ref], unless one holds the other (a link
-// around a button that says the same) — one thing to a person. Drawn and seen are told apart only
-// for the refusal, which says which ones are on screen.
+// is. Of several drawn, the one a person is looking at is meant when it is the only one (a
+// toolbar's "Actions" over a section's below the fold), and one that something covers on screen
+// (a form under a dialog's backdrop) is never meant while another is not covered. What is
+// still more than one is a refusal that lists them by their [ref], unless one holds the other
+// (a link around a button that says the same) — one thing to a person.
 func pickDrawn(
 	page *rod.Page, candidates []*proto.AccessibilityAXNode, role, text string,
 ) (*rod.Element, error) {
@@ -218,6 +220,7 @@ func pickDrawn(
 		node     *proto.AccessibilityAXNode
 		el       *rod.Element
 		onScreen bool
+		covered  bool
 	}
 	var drawn []drawnNode
 	seenBackend := map[proto.DOMBackendNodeID]bool{}
@@ -249,7 +252,8 @@ func pickDrawn(
 			}
 		}
 		if !same {
-			drawn = append(drawn, drawnNode{node: node, el: el, onScreen: seen.Value.Int() == 2})
+			drawn = append(drawn, drawnNode{node: node, el: el, onScreen: seen.Value.Int() == 2,
+				covered: seen.Value.Int() == 3})
 		}
 	}
 
@@ -258,6 +262,22 @@ func pickDrawn(
 		return nil, nil
 	case 1:
 		return drawn[0].el, nil
+	}
+
+	var onScreen, uncovered []drawnNode
+	for _, d := range drawn {
+		if d.onScreen {
+			onScreen = append(onScreen, d)
+		}
+		if !d.covered {
+			uncovered = append(uncovered, d)
+		}
+	}
+	if len(onScreen) == 1 {
+		return onScreen[0].el, nil
+	}
+	if len(uncovered) == 1 {
+		return uncovered[0].el, nil
 	}
 
 	var b strings.Builder
@@ -273,6 +293,8 @@ func pickDrawn(
 		fmt.Fprintf(&b, "\n  [%s] %s %q", d.node.NodeID, r, readable(AXValueStr(d.node.Name)))
 		if d.onScreen {
 			b.WriteString(" (on screen)")
+		} else if d.covered {
+			b.WriteString(" (covered)")
 		}
 	}
 	b.WriteString("\n  pick one with --ref <n>")
@@ -283,8 +305,9 @@ func pickDrawn(
 }
 
 // drawnCode is 2 for an element a person is looking at right now (its middle is on screen and
-// it, not something over it or a scroller clipping it, is what is there), 1 for one that is
-// drawn off screen, 0 for one that is not drawn at all.
+// it, not something over it or a scroller clipping it, is what is there), 3 for one on screen
+// with something else there, 1 for one that is drawn off screen, 0 for one that is not drawn
+// at all.
 const drawnCode = `() => {
 	const rects = this.getClientRects()
 	if (rects.length === 0) { return 0 }
@@ -310,7 +333,14 @@ const drawnCode = `() => {
 			up.getBoundingClientRect().width <= 0)) { up = up.parentElement }
 		if (up) { self = up }
 	}
-	return hit != null && (hit === self || self.contains(hit)) ? 2 : 1
+	if (hit != null && (hit === self || self.contains(hit))) { return 2 }
+	// clipped by a panel it scrolls in: scrolled to, it is there, so off screen, not covered
+	for (let up = this.parentElement; up; up = up.parentElement) {
+		if (getComputedStyle(up).overflow === "visible") { continue }
+		const r = up.getBoundingClientRect()
+		if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) { return 1 }
+	}
+	return 3
 }`
 
 // findAXNodes lists the nodes of the accessibility tree with that name, best first:
