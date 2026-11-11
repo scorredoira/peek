@@ -134,7 +134,7 @@ func cmdTest(ctx *cmdContext, args []string) error {
 		go func(t *peekTest) {
 			defer wg.Done()
 			sem <- struct{}{}
-			r := runTest(headless, t)
+			r := runTest(headless, ctx.paced, t)
 			<-sem
 
 			printMu.Lock()
@@ -214,12 +214,15 @@ func parseTestFile(path string) (*peekTest, error) {
 	return t, scanner.Err()
 }
 
-func runTest(headless bool, t *peekTest) testResult {
+// runTest runs one file in a Chrome of its own. paced (peek --paced test): its presses and keystrokes
+// go at a person's pace with the real pointer and keyboard, as events the page cannot tell from a
+// person's (isTrusted), for pages that only answer those.
+func runTest(headless, paced bool, t *peekTest) testResult {
 	start := time.Now()
 
 	// Allocate a unique port for this test.
 	port := allocTestPort()
-	ctx := &cmdContext{port: port, headless: headless}
+	ctx := &cmdContext{port: port, headless: headless, paced: paced}
 
 	// Variable store for exec captures.
 	vars := map[string]string{}
@@ -238,6 +241,12 @@ func runTest(headless bool, t *peekTest) testResult {
 		// Expand ${VAR} references before parsing.
 		expanded := expandVars(line.text, vars)
 		cmd, args := parseLine(expanded)
+
+		switch cmd {
+		case "click", "rightclick", "rclick", "dblclick", "fill", "select", "type", "press", "hover",
+			"drag", "upload", "scroll":
+			pace(ctx)
+		}
 
 		var err error
 		switch cmd {

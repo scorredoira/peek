@@ -744,6 +744,8 @@ peek test tests/                          # run all .peek files in directory (re
 peek test tests/login.peek                 # run a single test
 peek --headless test tests/               # headless mode (no browser window)
 peek -w 4 --headless test tests/          # 4 tests in parallel
+peek --paced test tests/                  # real pointer and keys, at a person's pace: events the page
+                                          # takes as a person's (isTrusted), for pages that only answer those
 ```
 
 #### shots, compare
