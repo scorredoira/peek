@@ -864,7 +864,16 @@ func CheckReach(el *rod.Element) (Reach, error) {
 		// would be judged transparent
 		if (!this.isConnected) { return { gone: true } }
 		const box = this.getBoundingClientRect()
-		if (box.top < 0 || box.left < 0 || box.bottom > innerHeight || box.right > innerWidth) {
+		// out of the window, or below the edge of a panel it scrolls in (a long menu): a person
+		// scrolls to it, the window or the panel
+		let clipped = box.top < 0 || box.left < 0 || box.bottom > innerHeight || box.right > innerWidth
+		for (let up = this.parentElement; up && !clipped; up = up.parentElement) {
+			const st = getComputedStyle(up)
+			if (!/(auto|scroll)/.test(st.overflowX + st.overflowY)) { continue }
+			const r = up.getBoundingClientRect()
+			clipped = box.top < r.top || box.left < r.left || box.bottom > r.bottom || box.right > r.right
+		}
+		if (clipped) {
 			this.scrollIntoView({ block: "center", inline: "center" })
 		}
 

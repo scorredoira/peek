@@ -370,7 +370,7 @@ clicked "Send"
 ```
 
 **It refuses a press a person could not make.** Before anything is dispatched the element is
-scrolled into view and checked: disabled (including `aria-disabled` and a disabled
+scrolled into view (the window, or the panel it scrolls in: a long menu) and checked: disabled (including `aria-disabled` and a disabled
 `<fieldset>`), not rendered, invisible, fully transparent, zero-sized, click-through, still
 outside the viewport, or covered by something else. It waits up to 3 seconds for that to pass
 (a menu fading in is transparent for its first frames); after that, each is an error naming

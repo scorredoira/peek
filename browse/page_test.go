@@ -360,3 +360,39 @@ root.innerHTML = "<div><span>Starter plan</span> <span>· yearly</span></div><in
 		t.Fatalf("text nowhere is not on screen: %v %v", has, err)
 	}
 }
+
+// A menu that scrolls inside the page hides its last items below its own edge, while they are
+// within the window: a person scrolls the menu. The press scrolled only when the window had to,
+// so it judged the point under the menu and refused the item as covered.
+func TestClickScrollsAMenuToItsItem(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+
+	err = page.page.SetDocumentContent(`<body style="margin:0">` +
+		`<div style="height:100px; overflow:auto; width:200px">` +
+		`<div style="height:300px">Edit</div><button id="discard">Discard</button></div>` +
+		`<div style="height:2000px">the page under the menu</div></body>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := page.page.Eval(`() => {
+		document.getElementById("discard").addEventListener("click", () => { window.pressed = true })
+	}`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := page.Click("Discard"); err != nil {
+		t.Fatalf("the item below the menu's edge was not pressed: %v", err)
+	}
+	pressed, err := page.page.Eval(`() => window.pressed === true`)
+	if err != nil || !pressed.Value.Bool() {
+		t.Fatalf("the press did not reach the item: %v", err)
+	}
+}
