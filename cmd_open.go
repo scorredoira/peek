@@ -100,6 +100,7 @@ func cmdOpen(ctx *cmdContext, args []string, portSet bool) error {
 	// fetches the same URL instantly. These two flags were the macOS keychain prompt's cure
 	// and are every platform's.
 	chromeArgs = append(chromeArgs, "--password-store=basic", "--use-mock-keychain")
+	chromeArgs = append(chromeArgs, browse.SandboxArgs()...)
 
 	// Launched BLANK, and navigated below once a session exists. Handing Chrome the url here
 	// means it is already loading before anything can attach, so the first document — the one

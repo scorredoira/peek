@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,7 @@ func Launch(opts LaunchOptions) (*Chrome, error) {
 		rules := fmt.Sprintf("MAP localhost %s, MAP *.localhost %s", opts.Server, opts.Server)
 		args = append(args, "--host-resolver-rules="+rules)
 	}
+	args = append(args, SandboxArgs()...)
 	args = append(args, "about:blank")
 
 	cmd := exec.Command(path, args...)
@@ -159,4 +161,13 @@ func (c *Chrome) Close() {
 	}
 
 	_ = os.RemoveAll(c.dir)
+}
+
+// SandboxArgs turns Chrome's sandbox off where Chrome refuses to start with it: as root on
+// Linux, which is how a CI server runs.
+func SandboxArgs() []string {
+	if runtime.GOOS == "linux" && os.Getuid() == 0 {
+		return []string{"--no-sandbox"}
+	}
+	return nil
 }
