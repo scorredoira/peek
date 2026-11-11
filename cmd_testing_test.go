@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A directory of tests that peek cannot read all of is an error, never a smaller suite: a
@@ -37,5 +38,20 @@ func TestExpandVarsOnlyTakesTheBracedForm(t *testing.T) {
 	want := `assert text "$25.00 25.00 7 $HOME"`
 	if got != want {
 		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+// A promise is always truthy: a check written as fetch().then(...) passed without its answer
+// being read. assert js waits for it.
+func TestAssertJSAwaitsAPromise(t *testing.T) {
+	ctx := chromeForTest(t)
+	if err := assertJS(ctx, "Promise.resolve(false)", time.Second); err == nil {
+		t.Fatal("a promise of false passed")
+	}
+	if err := assertJS(ctx, "new Promise(r => setTimeout(() => r(1), 50))", time.Second); err != nil {
+		t.Fatalf("a promise of 1 failed: %v", err)
+	}
+	if err := assertJS(ctx, "1 + 1 === 2", time.Second); err != nil {
+		t.Fatalf("a plain expression failed: %v", err)
 	}
 }

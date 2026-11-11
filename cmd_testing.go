@@ -583,7 +583,8 @@ func assertTitle(ctx *cmdContext, text string, timeout time.Duration) error {
 }
 
 func assertJS(ctx *cmdContext, expr string, timeout time.Duration) error {
-	code := fmt.Sprintf("() => { return !!(%s) }", expr)
+	// awaited: a promise is always truthy, so a check written as fetch().then(...) passed unread
+	code := fmt.Sprintf("async () => { return !!(await (%s)) }", expr)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		_, page, err := connect(ctx)

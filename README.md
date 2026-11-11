@@ -787,7 +787,7 @@ Rules:
 | `assert text <text>` | Text is visible on the page |
 | `assert gone <text>` | Text is NOT on the page |
 | `assert title <text>` | Page title contains text |
-| `assert js <expression>` | JavaScript expression returns truthy |
+| `assert js <expression>` | JavaScript expression returns truthy (a promise is awaited first) |
 | `assert clean` | The page has reported no errors up to this point |
 
 Assertions retry automatically until they pass or timeout. No need for explicit waits or sleeps between actions and assertions.
