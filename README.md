@@ -833,7 +833,7 @@ navigate http://localhost:9092/reset-password?token=${result}
 Rules:
 - Fails the test if exit code ≠ 0
 - Stdout is always captured in `${result}` (overwrites previous value)
-- `${result}` is expanded in all subsequent lines
+- `${result}` is expanded in all subsequent lines; only the braced form is expanded, so `$25.00` stays as written
 - Use `exec --as VARNAME` for named variables: `exec --as TOKEN mysql ...` → `${TOKEN}`
 - `exec` runs before Chrome is launched — useful for setup (creating users, cleaning DB)
 
