@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // A page's errors are what its documents said while they were on screen. What one says while
@@ -394,5 +397,82 @@ func TestClickScrollsAMenuToItsItem(t *testing.T) {
 	pressed, err := page.page.Eval(`() => window.pressed === true`)
 	if err != nil || !pressed.Value.Bool() {
 		t.Fatalf("the press did not reach the item: %v", err)
+	}
+}
+
+// A tab whose renderer dies (a low-memory killer sends it SIGTERM, as earlyoom does on a machine
+// out of memory) answers nothing ever again: every call ends at once saying so, never waiting
+// for ever for an answer.
+func TestATabWhoseRendererDiedSaysSoAtOnce(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<p>alive</p>`)
+	}))
+	defer server.Close()
+
+	// a Chrome of its own: its renderers are killed
+	chrome, err := Launch(LaunchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer chrome.Close()
+	page, err := chrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Open(server.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.Wait("alive"); err != nil {
+		t.Fatal(err)
+	}
+	if page.Gone() != nil {
+		t.Fatal("a live tab says it is gone")
+	}
+
+	info, err := proto.SystemInfoGetProcessInfo{}.Call(chrome.Browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed := 0
+	for _, p := range info.ProcessInfo {
+		if p.Type == "renderer" {
+			if err := syscall.Kill(int(p.ID), syscall.SIGTERM); err != nil {
+				t.Fatal(err)
+			}
+			killed++
+		}
+	}
+	if killed == 0 {
+		t.Fatal("Chrome has no renderer to kill")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := page.Eval(`() => document.title`)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a dead tab answered an eval")
+		}
+		if !errors.Is(page.Gone(), ErrRendererGone) {
+			t.Fatalf("the tab does not say its renderer is gone: %v (eval said %v)", page.Gone(), err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a call to a dead tab is still waiting after 10s")
+	}
+
+	start := time.Now()
+	if _, err := page.Has("alive"); err == nil {
+		t.Fatal("a dead tab answered Has")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("a call to a dead tab took %s", time.Since(start))
 	}
 }

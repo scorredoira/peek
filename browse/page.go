@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +32,9 @@ type Page struct {
 
 	mu     sync.Mutex
 	errors []string
+	// gone is set when the tab's renderer died (killed, as a low-memory killer does, or
+	// crashed): nothing it is asked will ever be answered, so every call ends at once
+	gone error
 	// contexts are the documents' script contexts the tab has had; left, the ones Open went
 	// away from
 	contexts []proto.RuntimeExecutionContextID
@@ -55,8 +59,22 @@ func (c *Chrome) SetCookie(host, name, value string) error {
 
 // watch wraps a tab and keeps what it reports.
 func (c *Chrome) watch(page *rod.Page) *Page {
-	p := &Page{page: page, left: map[proto.RuntimeExecutionContextID]bool{}}
-	go page.EachEvent(func(e *proto.RuntimeExecutionContextCreated) {
+	// every call is made under this context: a renderer that dies cancels it, and what was
+	// waiting for its answer ends instead of waiting for ever
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &Page{page: page.Context(ctx), left: map[proto.RuntimeExecutionContextID]bool{}}
+	died := func() {
+		p.mu.Lock()
+		p.gone = ErrRendererGone
+		p.mu.Unlock()
+		cancel()
+	}
+	go page.EachEvent(func(e *proto.InspectorTargetCrashed) {
+		died()
+	}, func(e *proto.InspectorDetached) {
+		// "Render process gone.": the tab's session ended with its renderer
+		died()
+	}, func(e *proto.RuntimeExecutionContextCreated) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.contexts = append(p.contexts, e.Context.ID)
@@ -80,8 +98,21 @@ func (c *Chrome) watch(page *rod.Page) *Page {
 		}
 		p.keep(e.ExecutionContextID, strings.Join(parts, " "))
 	})()
+	// the domain that says the renderer died
+	_ = proto.InspectorEnable{}.Call(page)
 
 	return p
+}
+
+// ErrRendererGone is what every call of a tab answers once its renderer died.
+var ErrRendererGone = errors.New("the page's renderer is gone (killed or crashed): nothing on it answers any more")
+
+// Gone says whether the tab's renderer died, and so why a call ended: ErrRendererGone, or nil
+// while it lives.
+func (p *Page) Gone() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gone
 }
 
 func (p *Page) keep(context proto.RuntimeExecutionContextID, text string) {

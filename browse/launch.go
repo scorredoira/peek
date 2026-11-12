@@ -97,6 +97,7 @@ func Launch(opts LaunchOptions) (*Chrome, error) {
 	args = append(args, "about:blank")
 
 	cmd := exec.Command(path, args...)
+	cmd.SysProcAttr = launchAttr()
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("cannot start Chrome: %w", err)
