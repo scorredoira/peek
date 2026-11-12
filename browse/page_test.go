@@ -476,3 +476,41 @@ func TestATabWhoseRendererDiedSaysSoAtOnce(t *testing.T) {
 		t.Fatalf("a call to a dead tab took %s", time.Since(start))
 	}
 }
+
+// The same words on two kinds of thing (a link of an index, a menu's button) are told apart by
+// role: Click refuses to guess, ClickRole presses the one of that role.
+func TestClickRolePressesTheOneOfThatRole(t *testing.T) {
+	if noChrome != "" {
+		t.Skipf("no Chrome on this machine: %s", noChrome)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<button onclick="document.title='button'">Models</button>
+<a href="#" onclick="document.title='link'; return false">Models</a>`)
+	}))
+	defer server.Close()
+
+	page, err := testChrome.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.page.Close()
+	if err := page.Open(server.URL); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := page.Click("Models"); err == nil {
+		t.Fatal("Click pressed one of two things that say the same")
+	}
+	if err := page.ClickRole("link", "Models"); err != nil {
+		t.Fatal(err)
+	}
+	title, err := page.Eval(`() => document.title`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "link" {
+		t.Fatalf("ClickRole pressed the %v", title)
+	}
+}

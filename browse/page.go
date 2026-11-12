@@ -151,10 +151,17 @@ func (p *Page) Open(url string) error {
 
 // Click presses what a person would mean by text: a button, a link, a tab.
 func (p *Page) Click(text string) error {
+	return p.ClickRole("", text)
+}
+
+// ClickRole presses the one of a role (link, button, tab…) that text names, where the same
+// words are on several kinds of thing ("Models" a link of an index and a menu's button); ""
+// is any role, as Click.
+func (p *Page) ClickRole(role, text string) error {
 	desc := fmt.Sprintf("%q", text)
 	deadline := time.Now().Add(retryTimeout)
 	for {
-		el, err := FindByText(p.page, text)
+		el, err := FindByRole(p.page, role, text)
 		if err != nil {
 			return err
 		}
